@@ -15,6 +15,7 @@ A Go service that validates Kubernetes ServiceAccount JWT tokens across multiple
 │  │ cluster-a   │ issuer: https://oidc.eks...          │    │
 │  │ cluster-b   │ issuer: https://k8s.internal.corp    │    │
 │  │             │ ca_cert: /path/to/ca.crt             │    │
+│  │             │ token_path: /path/to/token           │    │
 │  └─────────────┴──────────────────────────────────────┘    │
 ├─────────────────────────────────────────────────────────────┤
 │  POST /validate                                             │
@@ -115,7 +116,7 @@ List configured cluster names.
 
 ```yaml
 clusters:
-  # Public cloud cluster (uses public CA)
+  # Public cloud cluster (uses public CA, public OIDC endpoint)
   eks-prod:
     issuer: "https://oidc.eks.us-west-2.amazonaws.com/id/EXAMPLE"
 
@@ -123,6 +124,12 @@ clusters:
   internal:
     issuer: "https://k8s.internal.corp"
     ca_cert: "/path/to/internal-ca.crt"
+
+  # Cluster with protected OIDC endpoint (requires auth)
+  minikube:
+    issuer: "https://kubernetes.default.svc.cluster.local"
+    ca_cert: "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+    token_path: "/var/run/secrets/kubernetes.io/serviceaccount/token"
 ```
 
 ### Fields
@@ -131,6 +138,7 @@ clusters:
 |-------|----------|-------------|
 | `issuer` | Yes | OIDC issuer URL (used for discovery and JWKS) |
 | `ca_cert` | No | Path to CA certificate file for TLS verification |
+| `token_path` | No | Path to bearer token for authenticating to OIDC endpoint |
 
 ### Environment Variables
 
@@ -157,22 +165,37 @@ clusters:
 multi-k8s-auth/
 ├── cmd/
 │   └── server/
-│       └── main.go              # Entry point, CLI flags
+│       └── main.go                # Entry point, CLI flags
 ├── internal/
 │   ├── config/
-│   │   └── config.go            # YAML config loading
+│   │   ├── config.go              # YAML config loading
+│   │   └── config_test.go         # Unit tests
 │   ├── handler/
-│   │   ├── validate.go          # POST /validate
-│   │   ├── health.go            # GET /health
-│   │   └── clusters.go          # GET /clusters
+│   │   ├── validate.go            # POST /validate
+│   │   ├── health.go              # GET /health
+│   │   ├── clusters.go            # GET /clusters
+│   │   └── handler_test.go        # Unit tests
 │   ├── oidc/
-│   │   └── verifier.go          # OIDC verifier per cluster
+│   │   └── verifier.go            # OIDC verifier per cluster
 │   └── server/
-│       └── server.go            # HTTP server, routing
+│       └── server.go              # HTTP server, routing
+├── test/
+│   └── e2e/
+│       └── e2e_test.go            # End-to-end tests
+├── k8s/
+│   ├── namespace.yaml
+│   ├── serviceaccount.yaml
+│   ├── configmap.yaml
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   └── test-client.yaml           # Test client deployment
 ├── config/
 │   └── clusters.example.yaml
 ├── go.mod
 ├── Dockerfile
+├── Dockerfile.test
+├── Makefile
+├── skaffold.yaml
 └── README.md
 ```
 
@@ -183,6 +206,39 @@ multi-k8s-auth/
 | `github.com/go-chi/chi/v5` | v5.x | HTTP routing and middleware |
 | `github.com/coreos/go-oidc/v3` | v3.x | OIDC discovery, JWKS, JWT validation |
 | `gopkg.in/yaml.v3` | v3.x | Configuration parsing |
+
+## Development
+
+### Prerequisites
+
+- Go 1.24+
+- Docker
+- kubectl
+- Skaffold
+- minikube (or other Kubernetes cluster)
+
+### Commands
+
+```bash
+make build       # Build Docker images
+make deploy      # Deploy to Kubernetes
+make test-unit   # Run unit tests
+make test-e2e    # Run e2e tests in cluster
+make test        # Run all tests
+make clean       # Delete deployed resources
+```
+
+### Running E2E Tests
+
+E2E tests run inside the Kubernetes cluster:
+
+```bash
+# Deploy first
+make deploy
+
+# Run e2e tests
+make test-e2e
+```
 
 ## Authentication Flow
 
@@ -199,7 +255,11 @@ multi-k8s-auth/
 - JWKS fetched over TLS (custom CA supported)
 - Tokens validated for signature and expiration
 - Audience claim returned for caller to validate
-- No secrets stored - relies on public JWKS endpoints
+- No secrets stored - relies on JWKS endpoints
+
+### Protected OIDC Endpoints
+
+Some Kubernetes clusters (e.g., minikube) protect their OIDC discovery endpoints with authentication. Use `token_path` to provide a ServiceAccount token for authenticating to these endpoints.
 
 ## Design Decisions
 
@@ -210,3 +270,4 @@ multi-k8s-auth/
 | Audience validation | Caller responsibility | Authentication only, not authorization |
 | Config format | YAML with issuer URL | Standard OIDC approach, works with all K8s distributions |
 | CA certificate | File path only | Simple, works with mounted secrets |
+| Token auth | Optional `token_path` | Supports protected OIDC endpoints |
