@@ -1,3 +1,14 @@
-.git
 .claude
-
+config
+Dockerfile*
+.dockerignore
+docs
+.git
+.gitignore
+k8s
+LICENSE
+Makefile
+README.md
+scripts
+skaffold.env
+skaffold.yaml

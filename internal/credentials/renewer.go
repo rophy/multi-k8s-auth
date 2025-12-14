@@ -76,8 +76,6 @@ func (r *Renewer) renewLoop(ctx context.Context, cluster string, cfg config.Clus
 }
 
 func (r *Renewer) renew(ctx context.Context, cluster string, cfg config.ClusterConfig) error {
-	log.Printf("Renewing credentials for cluster %s", cluster)
-
 	// Get current credentials (bootstrap or previously renewed)
 	creds, ok := r.credStore.Get(cluster)
 	if !ok {
@@ -90,6 +88,21 @@ func (r *Renewer) renew(ctx context.Context, cluster string, cfg config.ClusterC
 		} else {
 			return fmt.Errorf("no credentials available for cluster %s", cluster)
 		}
+	}
+
+	// Check if token needs renewal based on expiration
+	renewBefore := r.config.GetRenewalRenewBefore()
+	if exp, err := getTokenExpiration(creds.Token); err == nil {
+		timeUntilExpiry := time.Until(exp)
+		if timeUntilExpiry > renewBefore {
+			log.Printf("Skipping renewal for cluster %s: token expires in %s (threshold: %s)",
+				cluster, timeUntilExpiry.Round(time.Minute), renewBefore)
+			return nil
+		}
+		log.Printf("Renewing credentials for cluster %s: token expires in %s (threshold: %s)",
+			cluster, timeUntilExpiry.Round(time.Minute), renewBefore)
+	} else {
+		log.Printf("Renewing credentials for cluster %s: could not determine expiration (%v)", cluster, err)
 	}
 
 	// Extract namespace and service account from current token
@@ -171,6 +184,32 @@ func parseServiceAccountFromToken(token string) (namespace, serviceAccount strin
 	}
 
 	return subParts[2], subParts[3], nil
+}
+
+// getTokenExpiration extracts the expiration time from a JWT token
+func getTokenExpiration(token string) (time.Time, error) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return time.Time{}, fmt.Errorf("invalid JWT format")
+	}
+
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return time.Time{}, fmt.Errorf("decoding JWT payload: %w", err)
+	}
+
+	var claims struct {
+		Exp int64 `json:"exp"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return time.Time{}, fmt.Errorf("parsing JWT claims: %w", err)
+	}
+
+	if claims.Exp == 0 {
+		return time.Time{}, fmt.Errorf("token has no expiration claim")
+	}
+
+	return time.Unix(claims.Exp, 0), nil
 }
 
 func (r *Renewer) createClient(cfg config.ClusterConfig, creds *Credentials) (*kubernetes.Clientset, error) {

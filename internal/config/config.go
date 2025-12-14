@@ -10,13 +10,15 @@ import (
 
 const (
 	DefaultRenewalInterval      = 1 * time.Hour
-	DefaultRenewalTokenDuration = 24 * time.Hour
+	DefaultRenewalTokenDuration = 168 * time.Hour // 7 days
+	DefaultRenewalRenewBefore   = 48 * time.Hour  // 2 days
 )
 
 // RenewalSettings contains global settings for token renewal
 type RenewalSettings struct {
 	Interval      time.Duration `yaml:"interval"`
 	TokenDuration time.Duration `yaml:"token_duration"`
+	RenewBefore   time.Duration `yaml:"renew_before"`
 }
 
 // UnmarshalYAML handles duration parsing from string
@@ -24,6 +26,7 @@ func (r *RenewalSettings) UnmarshalYAML(unmarshal func(interface{}) error) error
 	type rawRenewalSettings struct {
 		Interval      string `yaml:"interval"`
 		TokenDuration string `yaml:"token_duration"`
+		RenewBefore   string `yaml:"renew_before"`
 	}
 	var raw rawRenewalSettings
 	if err := unmarshal(&raw); err != nil {
@@ -44,6 +47,14 @@ func (r *RenewalSettings) UnmarshalYAML(unmarshal func(interface{}) error) error
 			return fmt.Errorf("parsing token_duration: %w", err)
 		}
 		r.TokenDuration = d
+	}
+
+	if raw.RenewBefore != "" {
+		d, err := time.ParseDuration(raw.RenewBefore)
+		if err != nil {
+			return fmt.Errorf("parsing renew_before: %w", err)
+		}
+		r.RenewBefore = d
 	}
 
 	return nil
@@ -89,6 +100,14 @@ func (c *Config) GetRenewalTokenDuration() time.Duration {
 		return c.Renewal.TokenDuration
 	}
 	return DefaultRenewalTokenDuration
+}
+
+// GetRenewalRenewBefore returns the configured renew_before threshold or default
+func (c *Config) GetRenewalRenewBefore() time.Duration {
+	if c.Renewal != nil && c.Renewal.RenewBefore > 0 {
+		return c.Renewal.RenewBefore
+	}
+	return DefaultRenewalRenewBefore
 }
 
 func Load(path string) (*Config, error) {

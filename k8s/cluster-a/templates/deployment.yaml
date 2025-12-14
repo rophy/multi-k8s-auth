@@ -19,8 +19,9 @@ spec:
         image: multi-k8s-auth
         ports:
         - containerPort: 8080
-        args:
-        - --config=/etc/multi-k8s-auth/clusters.yaml
+        env:
+        - name: CONFIG_PATH
+          value: /etc/multi-k8s-auth/clusters.yaml
         volumeMounts:
         - name: config
           mountPath: /etc/multi-k8s-auth
@@ -43,7 +44,7 @@ spec:
       volumes:
       - name: config
         configMap:
-          name: multi-k8s-auth-config
+          name: multi-k8s-auth
       - name: cluster-certs
         secret:
           secretName: multi-k8s-auth

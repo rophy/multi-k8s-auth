@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: multi-k8s-auth-config
+  name: multi-k8s-auth
   namespace: multi-k8s-auth
 data:
   clusters.yaml: |

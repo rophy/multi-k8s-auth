@@ -1,7 +1,8 @@
 # Global renewal settings (optional, uses defaults if not specified)
 renewal:
-  interval: "1h"        # How often to renew tokens (default: 1h)
-  token_duration: "24h" # Requested token TTL (default: 24h)
+  interval: "1h"          # How often to check for renewal (default: 1h)
+  token_duration: "168h"  # Requested token TTL (default: 168h / 7 days)
+  renew_before: "48h"     # Renew if token expires within this duration (default: 48h / 2 days)
 
 clusters:
   # EKS cluster (public OIDC endpoint)
