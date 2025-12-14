@@ -7,6 +7,8 @@ build:
   local:
     push: false
     useBuildkit: true
+  tagPolicy:
+    sha256: {}
   artifacts:
   - image: multi-k8s-auth
     docker:
@@ -16,14 +18,32 @@ build:
       dockerfile: Dockerfile.test
 
 deploy:
-  kubeContext: minikube
+  kubeContext: kind-cluster-a
   kubectl: {}
 
 manifests:
   rawYaml:
-  - k8s/namespace.yaml
-  - k8s/serviceaccount.yaml
-  - k8s/configmap.yaml
-  - k8s/deployment.yaml
-  - k8s/service.yaml
-  - k8s/test-client.yaml
+  - k8s/cluster-a/namespace.yaml
+  - k8s/cluster-a/serviceaccount.yaml
+  # configmap.yaml is created by setup-multicluster.sh with dynamic cluster-b config
+  - k8s/cluster-a/deployment.yaml
+  - k8s/cluster-a/service.yaml
+  - k8s/cluster-a/test-client.yaml
+
+---
+apiVersion: skaffold/v4beta7
+kind: Config
+metadata:
+  name: cluster-b
+
+build:
+  artifacts: []
+
+deploy:
+  kubeContext: kind-cluster-b
+  kubectl: {}
+
+manifests:
+  rawYaml:
+  - k8s/cluster-b/namespace.yaml
+  - k8s/cluster-b/test-client.yaml

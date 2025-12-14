@@ -9,8 +9,18 @@ import (
 
 type ClusterConfig struct {
 	Issuer    string `yaml:"issuer"`
+	APIServer string `yaml:"api_server,omitempty"` // Override URL for OIDC discovery
 	CACert    string `yaml:"ca_cert,omitempty"`
 	TokenPath string `yaml:"token_path,omitempty"`
+}
+
+// DiscoveryURL returns the URL to use for OIDC discovery.
+// If api_server is set, use it; otherwise use issuer.
+func (c *ClusterConfig) DiscoveryURL() string {
+	if c.APIServer != "" {
+		return c.APIServer
+	}
+	return c.Issuer
 }
 
 type Config struct {

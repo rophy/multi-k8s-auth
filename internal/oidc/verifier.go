@@ -4,9 +4,12 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -77,6 +80,12 @@ func (m *VerifierManager) Verify(ctx context.Context, clusterName, rawToken stri
 	}, nil
 }
 
+// oidcDiscovery represents the OIDC discovery document
+type oidcDiscovery struct {
+	Issuer  string `json:"issuer"`
+	JWKSURL string `json:"jwks_uri"`
+}
+
 func (m *VerifierManager) getOrCreateVerifier(ctx context.Context, name string, cfg config.ClusterConfig) (*oidc.IDTokenVerifier, error) {
 	m.mu.RLock()
 	if v, ok := m.verifiers[name]; ok {
@@ -98,18 +107,79 @@ func (m *VerifierManager) getOrCreateVerifier(ctx context.Context, name string, 
 		return nil, err
 	}
 
-	ctx = oidc.ClientContext(ctx, httpClient)
-	provider, err := oidc.NewProvider(ctx, cfg.Issuer)
+	// For remote clusters, the discovery URL (api_server) differs from the issuer
+	// We need to manually fetch discovery from api_server but validate tokens with the actual issuer
+	discoveryURL := cfg.DiscoveryURL()
+
+	// Fetch OIDC discovery document from the discovery URL
+	discovery, err := m.fetchDiscovery(ctx, httpClient, discoveryURL)
 	if err != nil {
-		return nil, fmt.Errorf("creating OIDC provider: %w", err)
+		return nil, fmt.Errorf("fetching OIDC discovery from %s: %w", discoveryURL, err)
 	}
 
-	verifier := provider.Verifier(&oidc.Config{
+	// Create a remote key set that fetches JWKS from the discovery URL's JWKS endpoint
+	// The JWKS URL from discovery might use the issuer's hostname, so we may need to rewrite it
+	jwksURL := discovery.JWKSURL
+	if cfg.APIServer != "" {
+		// Rewrite JWKS URL to use the API server instead of the internal issuer hostname
+		jwksURL = rewriteJWKSURL(discovery.JWKSURL, cfg.APIServer)
+	}
+
+	ctx = oidc.ClientContext(ctx, httpClient)
+	keySet := oidc.NewRemoteKeySet(ctx, jwksURL)
+
+	// Create verifier with the actual issuer from the token (not the discovery URL)
+	verifier := oidc.NewVerifier(cfg.Issuer, keySet, &oidc.Config{
 		SkipClientIDCheck: true,
 	})
 
 	m.verifiers[name] = verifier
 	return verifier, nil
+}
+
+// fetchDiscovery fetches the OIDC discovery document from the given URL
+func (m *VerifierManager) fetchDiscovery(ctx context.Context, client *http.Client, baseURL string) (*oidcDiscovery, error) {
+	wellKnownURL := strings.TrimSuffix(baseURL, "/") + "/.well-known/openid-configuration"
+
+	req, err := http.NewRequestWithContext(ctx, "GET", wellKnownURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetching discovery: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("discovery returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var discovery oidcDiscovery
+	if err := json.NewDecoder(resp.Body).Decode(&discovery); err != nil {
+		return nil, fmt.Errorf("decoding discovery: %w", err)
+	}
+
+	return &discovery, nil
+}
+
+// rewriteJWKSURL rewrites the JWKS URL to use the API server host instead of the internal issuer host
+func rewriteJWKSURL(jwksURL, apiServer string) string {
+	// The JWKS URL from k8s discovery typically looks like:
+	// https://kubernetes.default.svc.cluster.local/openid/v1/jwks
+	// We need to rewrite it to use the API server:
+	// https://<api-server>/openid/v1/jwks
+
+	// Find the path part after the host
+	const pathPrefix = "/openid/v1/jwks"
+	if strings.Contains(jwksURL, pathPrefix) {
+		return strings.TrimSuffix(apiServer, "/") + pathPrefix
+	}
+
+	// Fallback: just use the original URL
+	return jwksURL
 }
 
 func (m *VerifierManager) createHTTPClient(cfg config.ClusterConfig) (*http.Client, error) {

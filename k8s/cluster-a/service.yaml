@@ -4,8 +4,10 @@ metadata:
   name: multi-k8s-auth
   namespace: multi-k8s-auth
 spec:
+  type: NodePort
   selector:
     app: multi-k8s-auth
   ports:
   - port: 80
     targetPort: 8080
+    nodePort: 30080

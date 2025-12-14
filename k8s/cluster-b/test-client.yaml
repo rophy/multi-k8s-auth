@@ -22,14 +22,19 @@ spec:
       serviceAccountName: test-client
       containers:
       - name: test
-        image: multi-k8s-auth-test
+        image: multi-k8s-auth-test:latest
+        imagePullPolicy: IfNotPresent
+        command: ["sleep", "infinity"]
         env:
         - name: E2E_TEST
           value: "true"
+        # Point to multi-k8s-auth service in cluster-a (will be set by setup-multicluster.sh)
         - name: SERVICE_URL
-          value: "http://multi-k8s-auth"
+          value: "http://placeholder:30080"
         - name: TOKEN_PATH
           value: "/var/run/secrets/tokens/token"
+        - name: CLUSTER_NAME
+          value: "cluster-b"
         volumeMounts:
         - name: sa-token
           mountPath: /var/run/secrets/tokens

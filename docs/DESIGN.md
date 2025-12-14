@@ -2,9 +2,46 @@
 
 ## Overview
 
-A Go service that validates Kubernetes ServiceAccount JWT tokens across multiple clusters using OIDC discovery.
+A Go service that validates Kubernetes ServiceAccount JWT tokens across multiple clusters using OIDC discovery, with automated credential lifecycle management.
 
-## Architecture
+## System Architecture
+
+```
+cluster-a (service cluster)                 cluster-b (client cluster)
+┌─────────────────────────────────────┐     ┌─────────────────────────────┐
+│                                     │     │                             │
+│  ┌──────────┐    ┌──────────────┐   │     │  ┌─────────┐                │
+│  │ db-svc   │───▶│multi-k8s-auth│   │     │  │ client  │                │
+│  └──────────┘    └──────────────┘   │     │  └────┬────┘                │
+│       ▲                │            │     │       │                     │
+│       │                │ validates  │     │       │ connects with       │
+│       │                ▼            │     │       │ SA token            │
+│       │         ┌────────────┐      │     │       │                     │
+│       │         │ cluster-a  │      │     └───────┼─────────────────────┘
+│       │         │ OIDC       │      │             │
+│       │         └────────────┘      │             │
+│       │         ┌────────────┐      │             │
+│       │         │ cluster-b  │◀─────┼─────────────┘
+│       │         │ OIDC       │      │
+│       │         └────────────┘      │
+│       │                             │
+│       └─────────────────────────────┼─────────────┘
+│                                     │
+│  ┌───────────────────────────────┐  │     ┌─────────────────────────────┐
+│  │ Secret: credentials           │  │     │ multi-k8s-auth-agent        │
+│  │   cluster-b-token: <token>    │◀─┼─────│ (pushes fresh credentials)  │
+│  │   cluster-b-ca.crt: <cert>    │  │     │                             │
+│  └───────────────────────────────┘  │     └─────────────────────────────┘
+│                                     │
+└─────────────────────────────────────┘
+```
+
+**Assumptions:**
+- Services (e.g., db-svc) and multi-k8s-auth are co-located in the same cluster
+- Clients from any cluster connect to services with their SA tokens
+- Services delegate authentication to multi-k8s-auth
+
+## Component Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -147,6 +184,140 @@ clusters:
 | `PORT` | `8080` | Server listening port |
 | `CONFIG_PATH` | `config/clusters.yaml` | Path to cluster config file |
 
+## Credential Lifecycle Management
+
+multi-k8s-auth needs credentials (token + CA cert) to access remote cluster OIDC endpoints for JWKS fetching. These credentials are managed via the agent pattern.
+
+### Why Agent Pattern?
+
+| Approach | Security | Complexity | Automation |
+|----------|----------|------------|------------|
+| Long-lived tokens | Low | Low | None |
+| Bootstrap + self-refresh | Medium | Medium | Partial |
+| **Agent pattern** | **High** | **Medium** | **Full** |
+
+The agent pattern allows:
+- Short-lived tokens (hours, not days)
+- No long-lived credentials crossing network boundaries
+- Full automation after bootstrap
+
+### Credential Flow
+
+```
+Phase 1: Bootstrap (manual, one-time per cluster)
+───────────────────────────────────────────────────
+Admin creates bootstrap token:
+  kubectl create token multi-k8s-auth-agent -n multi-k8s-auth --duration=168h
+
+Configure multi-k8s-auth with bootstrap credentials (TTL=7d)
+
+
+Phase 2: Agent Registration (automated)
+───────────────────────────────────────────────────
+┌──────────────────────┐                    ┌────────────────────────┐
+│  multi-k8s-auth      │                    │  agent (cluster-b)     │
+│  (cluster-a)         │                    │                        │
+│                      │  POST /register    │                        │
+│                      │◀───────────────────│  Sends:                │
+│  1. Validate agent   │   + agent SA token │  - Its own SA token    │
+│     token using      │   + fresh creds    │  - Fresh OIDC creds    │
+│     bootstrap creds  │                    │    (token + CA cert)   │
+│                      │                    │                        │
+│  2. Check agent is   │                    │                        │
+│     authorized SA    │                    │                        │
+│                      │                    │                        │
+│  3. Accept & store   │                    │                        │
+│     fresh creds      │                    │                        │
+└──────────────────────┘                    └────────────────────────┘
+
+
+Phase 3: Continuous Refresh (automated)
+───────────────────────────────────────────────────
+Agent calls POST /register every hour with fresh credentials.
+multi-k8s-auth validates using current credentials (not bootstrap).
+Self-sustaining cycle - no long-lived credentials needed.
+```
+
+### Credential Persistence
+
+multi-k8s-auth persists credentials to a Kubernetes Secret (requires RBAC):
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: multi-k8s-auth-credentials
+  namespace: multi-k8s-auth
+type: Opaque
+data:
+  cluster-b-token: <base64-encoded-token>
+  cluster-b-ca.crt: <base64-encoded-cert>
+  cluster-c-token: <base64-encoded-token>
+  cluster-c-ca.crt: <base64-encoded-cert>
+```
+
+**Credential resolution order (on startup and refresh):**
+1. In-memory (freshest, from agent push)
+2. Kubernetes Secret (persisted, survives restart)
+3. Bootstrap config file (initial setup / disaster recovery)
+
+### Agent Authorization
+
+Only specific ServiceAccounts can register credentials:
+
+```yaml
+# Config: allowed agents per cluster
+agents:
+  cluster-b:
+    serviceAccount: "system:serviceaccount:multi-k8s-auth:multi-k8s-auth-agent"
+  cluster-c:
+    serviceAccount: "system:serviceaccount:multi-k8s-auth:multi-k8s-auth-agent"
+```
+
+### POST /register API
+
+**Request:**
+```json
+{
+  "cluster": "cluster-b",
+  "credentials": {
+    "token": "eyJhbGciOiJSUzI1NiIs...",
+    "ca_cert": "-----BEGIN CERTIFICATE-----\n..."
+  }
+}
+```
+
+**Headers:**
+```
+Authorization: Bearer <agent-sa-token>
+```
+
+**Response (200 OK):**
+```json
+{
+  "status": "accepted",
+  "cluster": "cluster-b",
+  "expires_at": "2024-01-15T12:00:00Z"
+}
+```
+
+**Error Response (401 Unauthorized):**
+```json
+{
+  "error": "unauthorized_agent",
+  "message": "ServiceAccount not authorized to register credentials for cluster-b"
+}
+```
+
+### Failure Scenarios
+
+| Scenario | Behavior |
+|----------|----------|
+| Agent dies | Credentials expire, falls back to bootstrap, alerts |
+| multi-k8s-auth restarts | Reads from persisted Secret |
+| Bootstrap expires before agent connects | Manual intervention required |
+| Network partition | Agent retries, credentials eventually expire |
+
 ## Error Codes
 
 | Code | HTTP Status | Description |
@@ -164,35 +335,49 @@ clusters:
 ```
 multi-k8s-auth/
 ├── cmd/
-│   └── server/
-│       └── main.go                # Entry point, CLI flags
+│   ├── server/
+│   │   └── main.go                # multi-k8s-auth entry point
+│   └── agent/
+│       └── main.go                # multi-k8s-auth-agent entry point
 ├── internal/
 │   ├── config/
 │   │   ├── config.go              # YAML config loading
 │   │   └── config_test.go         # Unit tests
 │   ├── handler/
 │   │   ├── validate.go            # POST /validate
+│   │   ├── register.go            # POST /register (agent credentials)
 │   │   ├── health.go              # GET /health
 │   │   ├── clusters.go            # GET /clusters
 │   │   └── handler_test.go        # Unit tests
 │   ├── oidc/
 │   │   └── verifier.go            # OIDC verifier per cluster
+│   ├── credentials/
+│   │   ├── store.go               # Credential storage interface
+│   │   ├── memory.go              # In-memory credential store
+│   │   └── secret.go              # Kubernetes Secret persistence
 │   └── server/
 │       └── server.go              # HTTP server, routing
 ├── test/
 │   └── e2e/
 │       └── e2e_test.go            # End-to-end tests
 ├── k8s/
-│   ├── namespace.yaml
-│   ├── serviceaccount.yaml
-│   ├── configmap.yaml
-│   ├── deployment.yaml
-│   ├── service.yaml
-│   └── test-client.yaml           # Test client deployment
+│   ├── cluster-a/                 # Service cluster manifests
+│   │   ├── namespace.yaml
+│   │   ├── serviceaccount.yaml
+│   │   ├── rbac.yaml              # RBAC for Secret management
+│   │   ├── configmap.yaml
+│   │   ├── deployment.yaml
+│   │   ├── service.yaml
+│   │   └── test-client.yaml
+│   └── cluster-b/                 # Client cluster manifests
+│       ├── namespace.yaml
+│       ├── serviceaccount.yaml    # For agent
+│       └── agent.yaml             # multi-k8s-auth-agent deployment
 ├── config/
 │   └── clusters.example.yaml
 ├── go.mod
 ├── Dockerfile
+├── Dockerfile.agent
 ├── Dockerfile.test
 ├── Makefile
 ├── skaffold.yaml
@@ -271,3 +456,7 @@ Some Kubernetes clusters (e.g., minikube) protect their OIDC discovery endpoints
 | Config format | YAML with issuer URL | Standard OIDC approach, works with all K8s distributions |
 | CA certificate | File path only | Simple, works with mounted secrets |
 | Token auth | Optional `token_path` | Supports protected OIDC endpoints |
+| Credential management | Agent pattern | Most secure, fully automated after bootstrap |
+| Credential persistence | Kubernetes Secret | Native K8s, survives restarts, no external deps |
+| Agent authorization | Specific ServiceAccount | Prevents unauthorized credential injection |
+| Deployment model | Co-located with service | Simplifies networking, shared lifecycle |

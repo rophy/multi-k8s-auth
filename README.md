@@ -12,16 +12,64 @@ Key benefits:
 - Cross-cluster authentication
 - Kubernetes-native identity delegation
 - Explicit, auditable trust
+- Automated credential lifecycle management
 - Low operational complexity
+
+---
+
+## Architecture
+
+```
+cluster-a (service cluster)              cluster-b (client cluster)
+┌────────────────────────────────────┐   ┌─────────────────────────────────┐
+│                                    │   │                                 │
+│  ┌──────────┐    ┌──────────────┐  │   │  ┌─────────┐                    │
+│  │ db-svc   │───▶│multi-k8s-auth│  │   │  │ client  │ (has SA token)     │
+│  └──────────┘    └──────────────┘  │   │  └────┬────┘                    │
+│       ▲                │           │   │       │                         │
+│       │                │ validates │   │       │ connects to db-svc      │
+│       │                ▼           │   │       │ with SA token           │
+│       │         ┌────────────┐     │   │       │                         │
+│       │         │ cluster-a  │     │   └───────┼─────────────────────────┘
+│       │         │ OIDC       │     │           │
+│       │         └────────────┘     │           │
+│       │                │           │           │
+│       │                │           │           │
+│       │         ┌────────────┐     │           │
+│       │         │ cluster-b  │◀────┼───────────┘
+│       │         │ OIDC       │     │
+│       │         └────────────┘     │
+│       │                            │
+│       └────────────────────────────┼───────────┘
+│                                    │
+│  ┌──────────────────────────────┐  │   ┌─────────────────────────────────┐
+│  │ Secret: credentials          │  │   │  multi-k8s-auth-agent           │
+│  │   cluster-b-token: <token>   │◀─┼───│  (pushes fresh credentials)     │
+│  │   cluster-b-ca.crt: <cert>   │  │   │                                 │
+│  └──────────────────────────────┘  │   └─────────────────────────────────┘
+│                                    │
+└────────────────────────────────────┘
+```
+
+**Components:**
+- **multi-k8s-auth**: Token validation service, co-located with services needing authentication
+- **multi-k8s-auth-agent**: Deployed in remote clusters, pushes fresh credentials to multi-k8s-auth
+- **db-svc**: Example service (e.g., database) that delegates authentication to multi-k8s-auth
+
+**Assumptions:**
+- Services (db-svc) and multi-k8s-auth are deployed in the same cluster
+- Clients from any cluster connect to services, authenticating with their SA tokens
+- multi-k8s-auth validates tokens from all configured clusters
 
 ---
 
 ## Goals
 
-- **Enable secure workload identity verification across Kubernetes clusters**  
-- **Delegate authentication to Kubernetes ServiceAccounts**, leveraging OIDC-compliant JWTs  
-- **Maintain minimal operational overhead**, avoiding service meshes or SPIFFE control planes  
-- **Provide explicit trust configuration** for each cluster to prevent accidental trust expansion  
+- **Enable secure workload identity verification across Kubernetes clusters**
+- **Delegate authentication to Kubernetes ServiceAccounts**, leveraging OIDC-compliant JWTs
+- **Automate credential lifecycle** for accessing remote cluster OIDC endpoints
+- **Maintain minimal operational overhead**, avoiding service meshes or SPIFFE control planes
+- **Provide explicit trust configuration** for each cluster to prevent accidental trust expansion
 
 ---
 
@@ -33,6 +81,7 @@ Kubernetes ServiceAccounts provide a strong local identity mechanism. However, t
 - **Kubernetes as OIDC Identity Provider**
 - **ServiceAccount projected JWTs**
 - **Explicit trust per cluster**
+- **Agent-based credential refresh** for secure, automated operations
 
 This approach allows cross-cluster workload authentication **without introducing new secrets or infrastructure**, while remaining auditable and secure.
 
@@ -60,14 +109,86 @@ This approach allows cross-cluster workload authentication **without introducing
 
 ### Authentication Flow
 
-1. **Client workload** obtains a projected ServiceAccount token.  
-2. **Client** sends the token to the target service over TLS.  
-3. **Service** validates the JWT:
+1. **Client workload** obtains a projected ServiceAccount token.
+2. **Client** sends the token to the target service over TLS.
+3. **Service** calls multi-k8s-auth `/validate` API with token + cluster name.
+4. **multi-k8s-auth** validates the JWT:
    - Verifies signature against issuer JWKS
-   - Checks `iss` and `aud` claims
-   - Ensures token is not expired  
-4. **Service** maps `sub` claim to internal identity.  
-5. Authorization is applied based on mapped identity.
+   - Checks `iss` claim matches configured issuer
+   - Ensures token is not expired
+5. **multi-k8s-auth** returns validated claims to service.
+6. **Service** applies authorization based on claims.
+
+---
+
+## Credential Lifecycle Management
+
+multi-k8s-auth needs credentials to access remote cluster OIDC endpoints (for JWKS). These credentials are managed automatically via the agent pattern.
+
+### Credential Flow
+
+```
+1. Bootstrap (manual, one-time):
+   ┌─────────────────────────────────────────────────────────────┐
+   │ Admin creates bootstrap token for cluster-b (TTL=7d)       │
+   │ kubectl create token multi-k8s-auth-agent --duration=168h  │
+   │ Configures multi-k8s-auth with bootstrap credentials       │
+   └─────────────────────────────────────────────────────────────┘
+
+2. Agent Registration (automated):
+   ┌──────────────────┐                    ┌──────────────────┐
+   │ multi-k8s-auth   │◀── POST /register ─│ agent (cluster-b)│
+   │ (cluster-a)      │    + SA token      │                  │
+   │                  │    + fresh creds   │                  │
+   │                  │                    │                  │
+   │ validates agent  │                    │                  │
+   │ token using      │                    │                  │
+   │ bootstrap creds  │                    │                  │
+   └──────────────────┘                    └──────────────────┘
+
+3. Credential Refresh (automated, continuous):
+   ┌──────────────────┐                    ┌──────────────────┐
+   │ multi-k8s-auth   │◀── POST /register ─│ agent (cluster-b)│
+   │                  │    (every hour)    │                  │
+   │ validates using  │                    │ generates fresh  │
+   │ current creds    │                    │ token locally    │
+   │                  │                    │                  │
+   │ updates K8s      │                    │                  │
+   │ Secret for       │                    │                  │
+   │ persistence      │                    │                  │
+   └──────────────────┘                    └──────────────────┘
+```
+
+### Credential Persistence
+
+multi-k8s-auth persists credentials to a Kubernetes Secret:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: multi-k8s-auth-credentials
+  namespace: multi-k8s-auth
+type: Opaque
+data:
+  cluster-b-token: <base64>
+  cluster-b-ca.crt: <base64>
+```
+
+**Fallback chain on startup:**
+1. In-memory credentials (freshest)
+2. Persisted Secret (survives restart)
+3. Bootstrap config (initial setup / recovery)
+
+### Agent Authorization
+
+Not any token from a remote cluster can push credentials. The agent must authenticate as a specific ServiceAccount:
+
+```yaml
+# Only this identity can register credentials
+allowedAgents:
+  cluster-b: "system:serviceaccount:multi-k8s-auth:multi-k8s-auth-agent"
+```
 
 ---
 
@@ -119,12 +240,20 @@ curl -H "Authorization: Bearer $(cat /var/run/secrets/tokens/token)" https://ser
 
 ---
 
+## Components
+
+| Component | Description | Deployment |
+|-----------|-------------|------------|
+| `multi-k8s-auth` | Token validation service | Service cluster |
+| `multi-k8s-auth-agent` | Credential refresh agent | Each remote cluster |
+
 ## Roadmap / Future Work
 
-* Optional mTLS integration for transport security
-* Multi-issuer federation support
+* `multi-k8s-auth-agent` implementation for automated credential refresh
+* mTLS integration for transport security
 * SDK / library for easy token verification in multiple languages
 * Example integrations with databases and HTTP services
+* Helm chart for easy deployment
 
 ---
 

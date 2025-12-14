@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 
@@ -50,6 +51,7 @@ func (h *ValidateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	claims, err := h.verifier.Verify(r.Context(), req.Cluster, req.Token)
 	if err != nil {
+		log.Printf("Validation error for cluster %s: %v", req.Cluster, err)
 		code, errResp := mapError(err)
 		w.WriteHeader(code)
 		json.NewEncoder(w).Encode(errResp)
