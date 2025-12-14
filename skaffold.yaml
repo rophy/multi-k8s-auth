@@ -6,6 +6,9 @@ metadata:
 profiles:
 - name: cluster-a
   build:
+    tagPolicy:
+      gitCommit:
+        variant: Tags
     local:
       push: false
       useBuildkit: true
