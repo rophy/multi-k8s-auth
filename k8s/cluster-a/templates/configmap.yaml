@@ -18,9 +18,10 @@ data:
         api_server: {{ .Values.cluster_b.api_server | quote }}
         ca_cert: "/etc/multi-k8s-auth/certs/cluster-b-ca.crt"
         token_path: "/etc/multi-k8s-auth/certs/cluster-b-token"
-
-    # Authorized agents that can register credentials
-    agents:
-      cluster-b:
-        serviceAccount: "system:serviceaccount:multi-k8s-auth:multi-k8s-auth-agent"
+        renewal:
+          enabled: true
+          service_account: "multi-k8s-auth-reader"
+          namespace: "multi-k8s-auth"
+          interval: "30m"
+          token_duration: "1h"
 

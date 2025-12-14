@@ -11,7 +11,13 @@ import (
 	"github.com/rophy/multi-k8s-auth/internal/oidc"
 )
 
-func New(cfg *config.Config, credStore *credentials.Store) http.Handler {
+// Server holds the HTTP handler and verifier manager
+type Server struct {
+	Handler  http.Handler
+	Verifier *oidc.VerifierManager
+}
+
+func New(cfg *config.Config, credStore *credentials.Store) *Server {
 	r := chi.NewRouter()
 
 	r.Use(middleware.Logger)
@@ -23,7 +29,9 @@ func New(cfg *config.Config, credStore *credentials.Store) http.Handler {
 	r.Get("/health", handler.Health)
 	r.Get("/clusters", handler.NewClustersHandler(cfg).ServeHTTP)
 	r.Post("/validate", handler.NewValidateHandler(verifier).ServeHTTP)
-	r.Post("/register", handler.NewRegisterHandler(verifier, cfg, credStore).ServeHTTP)
 
-	return r
+	return &Server{
+		Handler:  r,
+		Verifier: verifier,
+	}
 }

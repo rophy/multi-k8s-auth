@@ -18,9 +18,9 @@ source skaffold.env
 echo "Cluster-A API Server IP: $CLUSTER_A_IP"
 echo "Cluster-B API Server IP: $CLUSTER_B_IP"
 
-# Create a bootstrap token from the agent service account for accessing cluster-b OIDC endpoints
+# Create a bootstrap token from the reader service account for accessing cluster-b OIDC endpoints
 TOKEN_FILE="/tmp/cluster-b-token.txt"
-kubectl --context=kind-${CLUSTER_B} --namespace=${NAMESPACE} create token multi-k8s-auth-agent --duration=168h > "$TOKEN_FILE"
+kubectl --context=kind-${CLUSTER_B} --namespace=${NAMESPACE} create token multi-k8s-auth-reader --duration=168h > "$TOKEN_FILE"
 echo "BOOTSTRAP_TOKEN=$(cat $TOKEN_FILE | base64 -w0)" >> skaffold.env
 echo "✅ Bootstrap token created (7 day TTL)"
 

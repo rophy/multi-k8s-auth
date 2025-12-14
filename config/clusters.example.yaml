@@ -11,3 +11,16 @@ clusters:
   on-prem:
     issuer: "https://kubernetes.internal.corp"
     ca_cert: "/etc/multi-k8s-auth/certs/on-prem-ca.crt"
+
+  # Remote cluster with automatic credential renewal
+  remote-cluster:
+    issuer: "https://kubernetes.default.svc.cluster.local"
+    api_server: "https://192.168.1.100:6443"
+    ca_cert: "/etc/multi-k8s-auth/certs/remote-ca.crt"
+    token_path: "/etc/multi-k8s-auth/certs/remote-token"
+    renewal:
+      enabled: true
+      service_account: "multi-k8s-auth-reader"
+      namespace: "multi-k8s-auth"
+      interval: "30m"
+      token_duration: "1h"

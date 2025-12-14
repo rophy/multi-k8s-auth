@@ -114,6 +114,84 @@ clusters:
 	}
 }
 
+func TestLoad_WithRenewalConfig(t *testing.T) {
+	content := `
+clusters:
+  cluster-a:
+    issuer: "https://oidc.example.com"
+  cluster-b:
+    issuer: "https://kubernetes.default.svc.cluster.local"
+    api_server: "https://192.168.1.100:6443"
+    ca_cert: "/path/to/ca.crt"
+    token_path: "/path/to/token"
+    renewal:
+      enabled: true
+      service_account: "multi-k8s-auth-reader"
+      namespace: "multi-k8s-auth"
+      interval: "30m"
+      token_duration: "1h"
+`
+	cfg := loadFromString(t, content)
+
+	if len(cfg.Clusters) != 2 {
+		t.Errorf("expected 2 clusters, got %d", len(cfg.Clusters))
+	}
+
+	b, ok := cfg.Clusters["cluster-b"]
+	if !ok {
+		t.Fatal("cluster-b not found")
+	}
+
+	if b.Renewal == nil {
+		t.Fatal("cluster-b renewal config is nil")
+	}
+
+	if !b.Renewal.Enabled {
+		t.Error("expected renewal to be enabled")
+	}
+	if b.Renewal.ServiceAccount != "multi-k8s-auth-reader" {
+		t.Errorf("service_account = %q, want %q", b.Renewal.ServiceAccount, "multi-k8s-auth-reader")
+	}
+	if b.Renewal.Namespace != "multi-k8s-auth" {
+		t.Errorf("namespace = %q, want %q", b.Renewal.Namespace, "multi-k8s-auth")
+	}
+	if b.Renewal.Interval.Minutes() != 30 {
+		t.Errorf("interval = %v, want 30m", b.Renewal.Interval)
+	}
+	if b.Renewal.TokenDuration.Hours() != 1 {
+		t.Errorf("token_duration = %v, want 1h", b.Renewal.TokenDuration)
+	}
+}
+
+func TestGetRenewalClusters(t *testing.T) {
+	content := `
+clusters:
+  cluster-a:
+    issuer: "https://oidc.example.com"
+  cluster-b:
+    issuer: "https://oidc.other.com"
+    renewal:
+      enabled: true
+      service_account: "reader"
+      namespace: "default"
+  cluster-c:
+    issuer: "https://oidc.third.com"
+    renewal:
+      enabled: false
+      service_account: "reader"
+      namespace: "default"
+`
+	cfg := loadFromString(t, content)
+
+	renewalClusters := cfg.GetRenewalClusters()
+	if len(renewalClusters) != 1 {
+		t.Errorf("expected 1 renewal cluster, got %d", len(renewalClusters))
+	}
+	if len(renewalClusters) > 0 && renewalClusters[0] != "cluster-b" {
+		t.Errorf("expected cluster-b, got %s", renewalClusters[0])
+	}
+}
+
 // Helper functions
 
 func loadFromString(t *testing.T, content string) *Config {

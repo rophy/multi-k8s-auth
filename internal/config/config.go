@@ -3,15 +3,66 @@ package config
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
+type RenewalConfig struct {
+	Enabled        bool          `yaml:"enabled"`
+	ServiceAccount string        `yaml:"service_account"`
+	Namespace      string        `yaml:"namespace"`
+	Interval       time.Duration `yaml:"interval"`
+	TokenDuration  time.Duration `yaml:"token_duration"`
+}
+
+// UnmarshalYAML handles duration parsing from string
+func (r *RenewalConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	type rawRenewalConfig struct {
+		Enabled        bool   `yaml:"enabled"`
+		ServiceAccount string `yaml:"service_account"`
+		Namespace      string `yaml:"namespace"`
+		Interval       string `yaml:"interval"`
+		TokenDuration  string `yaml:"token_duration"`
+	}
+	var raw rawRenewalConfig
+	if err := unmarshal(&raw); err != nil {
+		return err
+	}
+
+	r.Enabled = raw.Enabled
+	r.ServiceAccount = raw.ServiceAccount
+	r.Namespace = raw.Namespace
+
+	if raw.Interval != "" {
+		d, err := time.ParseDuration(raw.Interval)
+		if err != nil {
+			return fmt.Errorf("parsing interval: %w", err)
+		}
+		r.Interval = d
+	} else {
+		r.Interval = 30 * time.Minute // default
+	}
+
+	if raw.TokenDuration != "" {
+		d, err := time.ParseDuration(raw.TokenDuration)
+		if err != nil {
+			return fmt.Errorf("parsing token_duration: %w", err)
+		}
+		r.TokenDuration = d
+	} else {
+		r.TokenDuration = 1 * time.Hour // default
+	}
+
+	return nil
+}
+
 type ClusterConfig struct {
-	Issuer    string `yaml:"issuer"`
-	APIServer string `yaml:"api_server,omitempty"` // Override URL for OIDC discovery
-	CACert    string `yaml:"ca_cert,omitempty"`
-	TokenPath string `yaml:"token_path,omitempty"`
+	Issuer    string         `yaml:"issuer"`
+	APIServer string         `yaml:"api_server,omitempty"` // Override URL for OIDC discovery
+	CACert    string         `yaml:"ca_cert,omitempty"`
+	TokenPath string         `yaml:"token_path,omitempty"`
+	Renewal   *RenewalConfig `yaml:"renewal,omitempty"`
 }
 
 // DiscoveryURL returns the URL to use for OIDC discovery.
@@ -23,14 +74,8 @@ func (c *ClusterConfig) DiscoveryURL() string {
 	return c.Issuer
 }
 
-// AgentConfig defines which ServiceAccount is authorized to register credentials for a cluster
-type AgentConfig struct {
-	ServiceAccount string `yaml:"serviceAccount"`
-}
-
 type Config struct {
 	Clusters map[string]ClusterConfig `yaml:"clusters"`
-	Agents   map[string]AgentConfig   `yaml:"agents,omitempty"`
 }
 
 func Load(path string) (*Config, error) {
@@ -65,20 +110,13 @@ func (c *Config) ClusterNames() []string {
 	return names
 }
 
-// IsAgentAuthorized checks if a ServiceAccount is authorized to register credentials for a cluster
-func (c *Config) IsAgentAuthorized(cluster, serviceAccount string) bool {
-	agent, ok := c.Agents[cluster]
-	if !ok {
-		return false
-	}
-	return agent.ServiceAccount == serviceAccount
-}
-
-// GetAgentClusters returns cluster names that have agent configuration
-func (c *Config) GetAgentClusters() []string {
-	names := make([]string, 0, len(c.Agents))
-	for name := range c.Agents {
-		names = append(names, name)
+// GetRenewalClusters returns cluster names that have renewal enabled
+func (c *Config) GetRenewalClusters() []string {
+	var names []string
+	for name, cfg := range c.Clusters {
+		if cfg.Renewal != nil && cfg.Renewal.Enabled {
+			names = append(names, name)
+		}
 	}
 	return names
 }
