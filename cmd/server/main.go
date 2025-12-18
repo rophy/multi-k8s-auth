@@ -28,16 +28,22 @@ func main() {
 
 	log.Printf("Loaded %d cluster(s): %v", len(cfg.Clusters), cfg.ClusterNames())
 
-	credStore, err := credentials.NewStore(*namespace, *secretName)
-	if err != nil {
-		log.Fatalf("Failed to create credential store: %v", err)
-	}
+	// Only create credential store if there are remote clusters
+	var credStore *credentials.Store
+	remoteClusters := cfg.GetRemoteClusters()
+	if len(remoteClusters) > 0 {
+		var err error
+		credStore, err = credentials.NewStore(*namespace, *secretName)
+		if err != nil {
+			log.Fatalf("Failed to create credential store: %v", err)
+		}
 
-	// Load bootstrap credentials from files for clusters with renewal enabled
-	for clusterName, clusterCfg := range cfg.Clusters {
-		if clusterCfg.TokenPath != "" && clusterCfg.CACert != "" {
-			if err := credStore.LoadFromFiles(clusterName, clusterCfg.TokenPath, clusterCfg.CACert); err != nil {
-				log.Printf("Warning: could not load bootstrap credentials for %s: %v", clusterName, err)
+		// Load bootstrap credentials from files for remote clusters
+		for clusterName, clusterCfg := range cfg.Clusters {
+			if clusterCfg.TokenPath != "" && clusterCfg.CACert != "" {
+				if err := credStore.LoadFromFiles(clusterName, clusterCfg.TokenPath, clusterCfg.CACert); err != nil {
+					log.Printf("Warning: could not load bootstrap credentials for %s: %v", clusterName, err)
+				}
 			}
 		}
 	}
@@ -45,7 +51,6 @@ func main() {
 	srv := server.New(cfg, credStore)
 
 	// Start credential renewal for remote clusters
-	remoteClusters := cfg.GetRemoteClusters()
 	if len(remoteClusters) > 0 {
 		log.Printf("Starting credential renewal for remote clusters: %v", remoteClusters)
 		ctx, cancel := context.WithCancel(context.Background())
