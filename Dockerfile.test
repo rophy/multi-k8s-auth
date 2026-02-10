@@ -1,14 +1,9 @@
-FROM golang:1.24-alpine
+FROM alpine:3.20
 
-RUN apk add --no-cache tini bash curl
+RUN apk add --no-cache bash curl jq bats tini
 
-WORKDIR /app
-
-COPY go.mod go.sum ./
-RUN go mod download
-
-COPY test test
+COPY test/e2e /app/test/e2e
 
 ENTRYPOINT ["/sbin/tini", "--"]
 
-CMD ["bash", "-c", "sleep infinity"]
+CMD ["sleep", "infinity"]

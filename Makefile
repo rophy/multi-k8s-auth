@@ -30,7 +30,7 @@ test-unit:
 # Run e2e tests in cluster-a
 test-e2e:
 	@echo "Running e2e tests in cluster-a..."
-	kubectl --context kind-cluster-a exec -n kube-federated-auth deployment/test-client -- go test -v ./test/e2e/...
+	kubectl --context kind-cluster-a exec -n kube-federated-auth deployment/test-client -- bats /app/test/e2e/
 
 # Run all tests
 test: test-unit test-e2e
