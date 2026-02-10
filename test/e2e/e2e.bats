@@ -63,6 +63,33 @@ setup() {
     [[ "$clusterExtra" == "$CLUSTER_NAME" ]]
 }
 
+@test "kubectl can call TokenReview via kubeconfig" {
+    local kubeconfig
+    kubeconfig=$(mktemp)
+    generate_kubeconfig > "$kubeconfig"
+
+    local token
+    token=$(get_token)
+
+    # Use kubectl --raw to POST a TokenReview
+    local result
+    result=$(kubectl --kubeconfig "$kubeconfig" create --raw /apis/authentication.k8s.io/v1/tokenreviews -f - <<EOF
+{"apiVersion":"authentication.k8s.io/v1","kind":"TokenReview","spec":{"token":"${token}"}}
+EOF
+    )
+    rm -f "$kubeconfig"
+
+    echo "# Response: $result"
+
+    local authenticated
+    authenticated=$(echo "$result" | jq -r '.status.authenticated')
+    [[ "$authenticated" == "true" ]]
+
+    local username
+    username=$(echo "$result" | jq -r '.status.user.username')
+    [[ "$username" == system:serviceaccount:* ]]
+}
+
 @test "TokenReview rejects invalid token" {
     local result
     result=$(token_review "invalid.token.here")

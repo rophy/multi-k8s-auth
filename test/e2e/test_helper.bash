@@ -23,6 +23,30 @@ token_review() {
         -d "{\"apiVersion\":\"authentication.k8s.io/v1\",\"kind\":\"TokenReview\",\"spec\":{\"token\":\"${token}\"}}"
 }
 
+# Generate a kubeconfig pointing at kube-federated-auth
+generate_kubeconfig() {
+    local token
+    token=$(get_token)
+    cat <<EOF
+apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: ${SERVICE_URL}
+  name: federated-auth
+contexts:
+- context:
+    cluster: federated-auth
+    user: test
+  name: test
+current-context: test
+users:
+- name: test
+  user:
+    token: ${token}
+EOF
+}
+
 # Wait for the service to be ready (up to 30 seconds)
 wait_for_service() {
     local attempts=0
