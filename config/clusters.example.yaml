@@ -1,3 +1,11 @@
+# Authorized clients whitelist (optional, omit to allow all callers)
+# Format: {cluster}/{namespace}/{serviceaccount}
+# Supports "*" wildcard in any segment
+# If set, callers must send their own SA token as Bearer in Authorization header
+authorized_clients:
+  - "cluster-a/kube-federated-auth/kube-auth-proxy"
+  - "cluster-a/kube-federated-auth/test-client"
+
 # Global renewal settings (optional, uses defaults if not specified)
 renewal:
   interval: "1h"          # How often to check for renewal (default: 1h)

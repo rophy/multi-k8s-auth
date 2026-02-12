@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	authv1 "k8s.io/api/authentication/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,13 +22,18 @@ import (
 // to indicate which cluster the token was validated against.
 const ExtraKeyClusterName = "authentication.kubernetes.io/cluster-name"
 
+// TokenVerifier verifies tokens against a specific cluster's JWKS.
+type TokenVerifier interface {
+	Verify(ctx context.Context, clusterName, rawToken string) (*oidc.Claims, error)
+}
+
 type TokenReviewHandler struct {
-	verifier  *oidc.VerifierManager
+	verifier  TokenVerifier
 	config    *config.Config
 	credStore *credentials.Store
 }
 
-func NewTokenReviewHandler(v *oidc.VerifierManager, cfg *config.Config, store *credentials.Store) *TokenReviewHandler {
+func NewTokenReviewHandler(v TokenVerifier, cfg *config.Config, store *credentials.Store) *TokenReviewHandler {
 	return &TokenReviewHandler{
 		verifier:  v,
 		config:    cfg,
@@ -37,6 +43,14 @@ func NewTokenReviewHandler(v *oidc.VerifierManager, cfg *config.Config, store *c
 
 func (h *TokenReviewHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+
+	// Step 0: Authenticate the caller via their own SA token
+	if h.config != nil && len(h.config.AuthorizedClients) > 0 {
+		if err := h.authenticateCaller(r); err != nil {
+			h.writeError(w, err.code, err.message)
+			return
+		}
+	}
 
 	// Parse TokenReview request
 	var tr authv1.TokenReview
@@ -83,6 +97,88 @@ func (h *TokenReviewHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Return the response from the remote cluster
 	json.NewEncoder(w).Encode(result)
+}
+
+type authError struct {
+	code    int
+	message string
+}
+
+func (e *authError) Error() string {
+	return e.message
+}
+
+// authenticateCaller verifies the caller's own ServiceAccount token from the Authorization header.
+// Returns nil if the caller is authorized, or an authError with appropriate HTTP status.
+func (h *TokenReviewHandler) authenticateCaller(r *http.Request) *authError {
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		return &authError{http.StatusUnauthorized, "Authorization header required"}
+	}
+
+	const bearerPrefix = "Bearer "
+	if !strings.HasPrefix(authHeader, bearerPrefix) {
+		return &authError{http.StatusUnauthorized, "Authorization header must use Bearer scheme"}
+	}
+
+	callerToken := strings.TrimPrefix(authHeader, bearerPrefix)
+	if callerToken == "" {
+		return &authError{http.StatusUnauthorized, "bearer token is empty"}
+	}
+
+	if h.verifier == nil {
+		return &authError{http.StatusInternalServerError, "server not configured for authentication"}
+	}
+
+	// Verify caller's token via JWKS to find the source cluster
+	var callerCluster string
+	var callerClaims *oidc.Claims
+	for clusterName := range h.config.Clusters {
+		claims, err := h.verifier.Verify(r.Context(), clusterName, callerToken)
+		if err == nil {
+			callerCluster = clusterName
+			callerClaims = claims
+			break
+		}
+	}
+
+	if callerClaims == nil {
+		return &authError{http.StatusUnauthorized, "caller token not valid for any configured cluster"}
+	}
+
+	// Extract namespace and service account from claims
+	namespace, saName := extractIdentity(callerClaims)
+	if namespace == "" || saName == "" {
+		return &authError{http.StatusUnauthorized, "caller token missing identity claims"}
+	}
+
+	// Check against authorized_clients whitelist
+	if !h.config.IsAuthorizedClient(callerCluster, namespace, saName) {
+		log.Printf("Unauthorized caller: %s/%s/%s", callerCluster, namespace, saName)
+		return &authError{http.StatusForbidden, fmt.Sprintf("caller %s/%s/%s is not authorized", callerCluster, namespace, saName)}
+	}
+
+	log.Printf("Authorized caller: %s/%s/%s", callerCluster, namespace, saName)
+	return nil
+}
+
+// extractIdentity extracts namespace and service account name from OIDC claims.
+func extractIdentity(claims *oidc.Claims) (namespace, serviceAccount string) {
+	if claims.Kubernetes == nil {
+		return "", ""
+	}
+
+	if ns, ok := claims.Kubernetes["namespace"].(string); ok {
+		namespace = ns
+	}
+
+	if sa, ok := claims.Kubernetes["serviceaccount"].(map[string]any); ok {
+		if name, ok := sa["name"].(string); ok {
+			serviceAccount = name
+		}
+	}
+
+	return namespace, serviceAccount
 }
 
 // detectCluster tries to verify the token against all configured clusters using JWKS.

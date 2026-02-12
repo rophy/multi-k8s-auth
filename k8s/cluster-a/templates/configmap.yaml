@@ -5,6 +5,11 @@ metadata:
   namespace: kube-federated-auth
 data:
   clusters.yaml: |
+    authorized_clients:
+      - "cluster-a/kube-federated-auth/kube-auth-proxy"
+      - "cluster-a/kube-federated-auth/test-client"
+      - "cluster-a/kube-federated-auth/echo-server"
+
     clusters:
       # Local cluster (cluster-a)
       cluster-a:

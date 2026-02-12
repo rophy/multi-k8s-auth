@@ -20,11 +20,20 @@ get_token() {
     kexec cat "$TOKEN_PATH"
 }
 
+# Read the caller's own SA token (from the default service account mount)
+get_caller_token() {
+    kexec cat /var/run/secrets/kubernetes.io/serviceaccount/token
+}
+
 # POST a TokenReview request via curl in the test-client pod
+# The caller's own SA token is sent as Bearer in Authorization header.
 token_review() {
     local token="$1"
+    local caller_token
+    caller_token=$(get_caller_token)
     kexec curl -s -X POST "${SERVICE_URL}/apis/authentication.k8s.io/v1/tokenreviews" \
         -H "Content-Type: application/json" \
+        -H "Authorization: Bearer ${caller_token}" \
         -d "{\"apiVersion\":\"authentication.k8s.io/v1\",\"kind\":\"TokenReview\",\"spec\":{\"token\":\"${token}\"}}"
 }
 

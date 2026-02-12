@@ -193,6 +193,91 @@ clusters:
 	}
 }
 
+func TestIsAuthorizedClient_ExactMatch(t *testing.T) {
+	cfg := &Config{
+		AuthorizedClients: []string{"cluster-a/default/my-app"},
+	}
+	if !cfg.IsAuthorizedClient("cluster-a", "default", "my-app") {
+		t.Error("expected exact match to be authorized")
+	}
+}
+
+func TestIsAuthorizedClient_WildcardCluster(t *testing.T) {
+	cfg := &Config{
+		AuthorizedClients: []string{"*/default/my-app"},
+	}
+	if !cfg.IsAuthorizedClient("cluster-b", "default", "my-app") {
+		t.Error("expected wildcard cluster to match")
+	}
+}
+
+func TestIsAuthorizedClient_WildcardNamespace(t *testing.T) {
+	cfg := &Config{
+		AuthorizedClients: []string{"cluster-a/*/my-app"},
+	}
+	if !cfg.IsAuthorizedClient("cluster-a", "some-ns", "my-app") {
+		t.Error("expected wildcard namespace to match")
+	}
+}
+
+func TestIsAuthorizedClient_WildcardServiceAccount(t *testing.T) {
+	cfg := &Config{
+		AuthorizedClients: []string{"cluster-a/default/*"},
+	}
+	if !cfg.IsAuthorizedClient("cluster-a", "default", "any-sa") {
+		t.Error("expected wildcard service account to match")
+	}
+}
+
+func TestIsAuthorizedClient_AllWildcards(t *testing.T) {
+	cfg := &Config{
+		AuthorizedClients: []string{"*/*/*"},
+	}
+	if !cfg.IsAuthorizedClient("any-cluster", "any-ns", "any-sa") {
+		t.Error("expected all wildcards to match anything")
+	}
+}
+
+func TestIsAuthorizedClient_NoMatch(t *testing.T) {
+	cfg := &Config{
+		AuthorizedClients: []string{"cluster-a/default/my-app"},
+	}
+	if cfg.IsAuthorizedClient("cluster-b", "default", "my-app") {
+		t.Error("expected no match for different cluster")
+	}
+}
+
+func TestIsAuthorizedClient_EmptyList(t *testing.T) {
+	cfg := &Config{}
+	if cfg.IsAuthorizedClient("cluster-a", "default", "my-app") {
+		t.Error("expected empty list to deny all")
+	}
+}
+
+func TestIsAuthorizedClient_MultipleEntries(t *testing.T) {
+	cfg := &Config{
+		AuthorizedClients: []string{
+			"cluster-a/default/app-1",
+			"cluster-b/*/proxy",
+		},
+	}
+	if !cfg.IsAuthorizedClient("cluster-b", "kube-system", "proxy") {
+		t.Error("expected second entry to match")
+	}
+	if cfg.IsAuthorizedClient("cluster-c", "default", "app-1") {
+		t.Error("expected no match for cluster-c")
+	}
+}
+
+func TestIsAuthorizedClient_MalformedEntry(t *testing.T) {
+	cfg := &Config{
+		AuthorizedClients: []string{"only-two/segments"},
+	}
+	if cfg.IsAuthorizedClient("only-two", "segments", "anything") {
+		t.Error("expected malformed entry to not match")
+	}
+}
+
 // Helper functions
 
 func loadFromString(t *testing.T, content string) *Config {

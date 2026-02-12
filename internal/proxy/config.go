@@ -39,51 +39,44 @@ func (c *Config) Validate() error {
 }
 
 // NewTokenReviewer creates a TokenReviewer based on the configuration.
-// If TokenReviewURL is set, it targets that URL with plain HTTP.
-// Otherwise, it uses in-cluster Kubernetes API with TLS and bearer token.
+// If TokenReviewURL is set, it targets that URL; otherwise it derives the
+// URL from in-cluster environment variables. In both cases, the SA token
+// is sent as Bearer for authentication and TLS is configured if a CA cert exists.
 func (c *Config) NewTokenReviewer() (*HTTPTokenReviewer, error) {
+	// 1. Determine endpoint URL
+	var url string
 	if c.TokenReviewURL != "" {
-		return &HTTPTokenReviewer{
-			url:    c.TokenReviewURL + tokenReviewPath,
-			client: http.DefaultClient,
-		}, nil
+		url = c.TokenReviewURL + tokenReviewPath
+	} else {
+		host := os.Getenv("KUBERNETES_SERVICE_HOST")
+		port := os.Getenv("KUBERNETES_SERVICE_PORT")
+		if host == "" || port == "" {
+			return nil, fmt.Errorf("not running in-cluster: KUBERNETES_SERVICE_HOST and KUBERNETES_SERVICE_PORT not set (use --token-review-url for out-of-cluster usage)")
+		}
+		url = "https://" + net.JoinHostPort(host, port) + tokenReviewPath
 	}
 
-	host := os.Getenv("KUBERNETES_SERVICE_HOST")
-	port := os.Getenv("KUBERNETES_SERVICE_PORT")
-	if host == "" || port == "" {
-		return nil, fmt.Errorf("not running in-cluster: KUBERNETES_SERVICE_HOST and KUBERNETES_SERVICE_PORT not set (use --token-review-url for out-of-cluster usage)")
+	// 2. Configure TLS if CA cert is available
+	client := http.DefaultClient
+	if caCert, err := os.ReadFile(inClusterCAFile); err == nil {
+		caCertPool := x509.NewCertPool()
+		if caCertPool.AppendCertsFromPEM(caCert) {
+			client = &http.Client{
+				Transport: &http.Transport{
+					TLSClientConfig: &tls.Config{
+						RootCAs: caCertPool,
+					},
+				},
+			}
+		}
 	}
 
-	token, err := os.ReadFile(inClusterTokenFile)
-	if err != nil {
-		return nil, fmt.Errorf("reading service account token: %w", err)
+	// 3. Read SA token for caller authentication
+	reviewer := &HTTPTokenReviewer{url: url, client: client}
+	if token, err := os.ReadFile(inClusterTokenFile); err == nil {
+		reviewer.bearerToken = string(token)
 	}
-
-	caCert, err := os.ReadFile(inClusterCAFile)
-	if err != nil {
-		return nil, fmt.Errorf("reading CA certificate: %w", err)
-	}
-
-	caCertPool := x509.NewCertPool()
-	if !caCertPool.AppendCertsFromPEM(caCert) {
-		return nil, fmt.Errorf("failed to parse CA certificate from %s", inClusterCAFile)
-	}
-
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				RootCAs: caCertPool,
-			},
-		},
-	}
-
-	apiServerURL := "https://" + net.JoinHostPort(host, port)
-	return &HTTPTokenReviewer{
-		url:         apiServerURL + tokenReviewPath,
-		client:      client,
-		bearerToken: string(token),
-	}, nil
+	return reviewer, nil
 }
 
 func getEnv(key, fallback string) string {

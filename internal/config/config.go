@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -82,8 +83,29 @@ func (c *ClusterConfig) IsRemote() bool {
 }
 
 type Config struct {
-	Renewal  *RenewalSettings          `yaml:"renewal,omitempty"`
-	Clusters map[string]ClusterConfig `yaml:"clusters"`
+	AuthorizedClients []string                  `yaml:"authorized_clients,omitempty"`
+	Renewal           *RenewalSettings          `yaml:"renewal,omitempty"`
+	Clusters          map[string]ClusterConfig `yaml:"clusters"`
+}
+
+// IsAuthorizedClient checks if a caller identity matches the authorized_clients whitelist.
+// Each entry is in format "cluster/namespace/serviceaccount" with optional "*" wildcards.
+// Returns false if the whitelist is empty (deny all by default).
+func (c *Config) IsAuthorizedClient(cluster, namespace, serviceAccount string) bool {
+	for _, entry := range c.AuthorizedClients {
+		parts := strings.SplitN(entry, "/", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		if matchSegment(parts[0], cluster) && matchSegment(parts[1], namespace) && matchSegment(parts[2], serviceAccount) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchSegment(pattern, value string) bool {
+	return pattern == "*" || pattern == value
 }
 
 // GetRenewalInterval returns the configured renewal interval or default

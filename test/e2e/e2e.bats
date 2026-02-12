@@ -63,37 +63,20 @@ setup() {
     [[ "$clusterExtra" == "$CLUSTER_NAME" ]]
 }
 
-@test "kubectl can call TokenReview via kubeconfig" {
-    local token
-    token=$(get_token)
+@test "TokenReview works with separate caller and review tokens" {
+    # Caller authenticates with their default SA token (Authorization header),
+    # and reviews a different token (the projected one in request body)
+    local caller_token
+    caller_token=$(get_caller_token)
 
-    # Generate kubeconfig and run kubectl inside the pod
+    local review_token
+    review_token=$(get_token)
+
     local result
-    result=$(kexec sh -c "
-        KUBECONFIG=\$(mktemp)
-        cat > \$KUBECONFIG <<KUBEEOF
-apiVersion: v1
-kind: Config
-clusters:
-- cluster:
-    server: ${SERVICE_URL}
-  name: federated-auth
-contexts:
-- context:
-    cluster: federated-auth
-    user: test
-  name: test
-current-context: test
-users:
-- name: test
-  user:
-    token: ${token}
-KUBEEOF
-        kubectl --kubeconfig \$KUBECONFIG create --raw /apis/authentication.k8s.io/v1/tokenreviews -f - <<JSONEOF
-{\"apiVersion\":\"authentication.k8s.io/v1\",\"kind\":\"TokenReview\",\"spec\":{\"token\":\"${token}\"}}
-JSONEOF
-        rm -f \$KUBECONFIG
-    ")
+    result=$(kexec curl -s -X POST "${SERVICE_URL}/apis/authentication.k8s.io/v1/tokenreviews" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer ${caller_token}" \
+        -d "{\"apiVersion\":\"authentication.k8s.io/v1\",\"kind\":\"TokenReview\",\"spec\":{\"token\":\"${review_token}\"}}")
 
     echo "# Response: $result"
 
@@ -121,4 +104,16 @@ JSONEOF
     error=$(echo "$result" | jq -r '.status.error')
     [[ -n "$error" ]]
     [[ "$error" != "null" ]]
+}
+
+@test "TokenReview rejects request without Authorization header" {
+    # Send a TokenReview without caller auth — should get 401
+    local http_code
+    http_code=$(kexec curl -s -o /dev/null -w '%{http_code}' -X POST \
+        "${SERVICE_URL}/apis/authentication.k8s.io/v1/tokenreviews" \
+        -H "Content-Type: application/json" \
+        -d '{"apiVersion":"authentication.k8s.io/v1","kind":"TokenReview","spec":{"token":"some-token"}}')
+
+    echo "# HTTP status: $http_code"
+    [[ "$http_code" == "401" ]]
 }
