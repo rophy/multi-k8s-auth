@@ -41,4 +41,26 @@ profiles:
         createNamespace: true
         namespace: kube-federated-auth
         chartPath: k8s/cluster-b
+- name: proxy
+  build:
+    tagPolicy:
+      gitCommit:
+        variant: Tags
+    local:
+      push: false
+      useBuildkit: true
+    artifacts:
+    - image: kube-auth-proxy
+      docker:
+        dockerfile: Dockerfile.proxy
+        buildArgs:
+          VERSION: "{{.IMAGE_TAG}}"
+  deploy:
+    kubeContext: kind-cluster-a
+    helm:
+      releases:
+      - name: kube-auth-proxy
+        createNamespace: true
+        namespace: kube-federated-auth
+        chartPath: k8s/kube-auth-proxy
 

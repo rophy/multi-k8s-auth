@@ -1,4 +1,4 @@
-.PHONY: build image kind deploy test-unit test-e2e test destroy clean help
+.PHONY: build build-proxy image kind deploy deploy-proxy test-unit test-e2e test-e2e-proxy test destroy clean help
 
 .DEFAULT_GOAL := help
 
@@ -6,6 +6,9 @@
 
 build: ## Build Docker images (local dev)
 	skaffold build -p cluster-a
+
+build-proxy: ## Build kube-auth-proxy Docker image (local dev)
+	skaffold build -p proxy
 
 image: ## Build release image
 	./scripts/build-image.sh
@@ -23,6 +26,9 @@ deploy: ## Setup clusters and deploy everything
 	skaffold run -p cluster-b
 	scripts/setup-multicluster.sh
 	skaffold run -p cluster-a
+
+deploy-proxy: ## Deploy kube-auth-proxy to cluster-a
+	skaffold run -p proxy
 
 destroy: ## Destroy Kind clusters and all deployments
 	@echo "Removing deployments from cluster-a..."
@@ -42,6 +48,9 @@ test-unit: ## Run unit tests
 
 test-e2e: ## Run e2e tests in cluster-a
 	kubectl --context kind-cluster-a exec -n kube-federated-auth deployment/test-client -- bats /app/test/e2e/
+
+test-e2e-proxy: ## Run proxy e2e tests in cluster-a
+	kubectl --context kind-cluster-a exec -n kube-federated-auth deployment/test-client -- bats /app/test/e2e/proxy.bats
 
 ## Help
 
