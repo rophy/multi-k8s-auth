@@ -28,12 +28,7 @@ func main() {
 		log.Printf("Auth subrequest mode only")
 	}
 
-	restConfig, err := cfg.RESTConfig()
-	if err != nil {
-		log.Fatalf("Failed to build REST config: %v", err)
-	}
-
-	reviewer, err := proxy.NewKubeTokenReviewer(restConfig)
+	reviewer, err := cfg.NewTokenReviewer()
 	if err != nil {
 		log.Fatalf("Failed to create token reviewer: %v", err)
 	}

@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	authv1 "k8s.io/api/authentication/v1"
 )
 
 func TestReverseProxy_Authenticated(t *testing.T) {
@@ -23,7 +21,7 @@ func TestReverseProxy_Authenticated(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	extra := map[string]authv1.ExtraValue{
+	extra := map[string][]string{
 		ExtraKeyClusterName: {"cluster-b"},
 	}
 	reviewer := authenticatedReviewer("system:serviceaccount:default:test", []string{"system:serviceaccounts"}, extra)

@@ -20,8 +20,6 @@ const (
 	HeaderForwardedExtraCluster = "X-Forwarded-Extra-Cluster-Name"
 )
 
-const ExtraKeyClusterName = "authentication.kubernetes.io/cluster-name"
-
 type AuthHandler struct {
 	reviewer TokenReviewer
 }
@@ -54,7 +52,7 @@ func (h *AuthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set(HeaderAuthRequestGroups, strings.Join(result.Status.User.Groups, ","))
 	}
 	if clusterNames, ok := result.Status.User.Extra[ExtraKeyClusterName]; ok && len(clusterNames) > 0 {
-		w.Header().Set(HeaderAuthRequestExtraCluster, string(clusterNames[0]))
+		w.Header().Set(HeaderAuthRequestExtraCluster, clusterNames[0])
 	}
 
 	w.WriteHeader(http.StatusOK)

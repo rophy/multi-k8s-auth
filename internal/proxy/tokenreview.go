@@ -1,52 +1,93 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
-
-	authv1 "k8s.io/api/authentication/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
+	"net/http"
 )
+
+const ExtraKeyClusterName = "authentication.kubernetes.io/cluster-name"
+
+// TokenReview types — lightweight replacements for k8s.io/api/authentication/v1.
+// Only the fields we need for JSON serialization.
+
+type TokenReviewRequest struct {
+	APIVersion string          `json:"apiVersion"`
+	Kind       string          `json:"kind"`
+	Spec       TokenReviewSpec `json:"spec"`
+}
+
+type TokenReviewSpec struct {
+	Token string `json:"token"`
+}
+
+type TokenReviewResponse struct {
+	APIVersion string            `json:"apiVersion"`
+	Kind       string            `json:"kind"`
+	Status     TokenReviewStatus `json:"status"`
+}
+
+type TokenReviewStatus struct {
+	Authenticated bool     `json:"authenticated"`
+	User          UserInfo `json:"user,omitempty"`
+	Error         string   `json:"error,omitempty"`
+}
+
+type UserInfo struct {
+	Username string              `json:"username"`
+	Groups   []string            `json:"groups,omitempty"`
+	Extra    map[string][]string `json:"extra,omitempty"`
+}
 
 // TokenReviewer validates tokens via the TokenReview API.
 type TokenReviewer interface {
-	Review(ctx context.Context, token string) (*authv1.TokenReview, error)
+	Review(ctx context.Context, token string) (*TokenReviewResponse, error)
 }
 
-// KubeTokenReviewer calls the TokenReview API using a Kubernetes client.
-// Works with any endpoint that speaks the TokenReview API:
-// - Kubernetes API server (in-cluster or via kubeconfig)
-// - kube-federated-auth (via --token-review-url)
-type KubeTokenReviewer struct {
-	client kubernetes.Interface
+// HTTPTokenReviewer calls the TokenReview API using a plain HTTP client.
+type HTTPTokenReviewer struct {
+	url        string // full URL to POST TokenReview requests
+	client     *http.Client
+	bearerToken string // optional: for authenticating to the API server
 }
 
-// NewKubeTokenReviewer creates a TokenReviewer from a rest.Config.
-func NewKubeTokenReviewer(config *rest.Config) (*KubeTokenReviewer, error) {
-	clientset, err := kubernetes.NewForConfig(config)
+func (r *HTTPTokenReviewer) Review(ctx context.Context, token string) (*TokenReviewResponse, error) {
+	reqBody := TokenReviewRequest{
+		APIVersion: "authentication.k8s.io/v1",
+		Kind:       "TokenReview",
+		Spec:       TokenReviewSpec{Token: token},
+	}
+
+	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("creating kubernetes client: %w", err)
+		return nil, fmt.Errorf("marshaling token review request: %w", err)
 	}
 
-	return &KubeTokenReviewer{client: clientset}, nil
-}
-
-func (c *KubeTokenReviewer) Review(ctx context.Context, token string) (*authv1.TokenReview, error) {
-	tr := &authv1.TokenReview{
-		Spec: authv1.TokenReviewSpec{
-			Token: token,
-		},
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.url, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if r.bearerToken != "" {
+		req.Header.Set("Authorization", "Bearer "+r.bearerToken)
 	}
 
-	result, err := c.client.AuthenticationV1().TokenReviews().Create(ctx, tr, metav1.CreateOptions{})
+	resp, err := r.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("calling token review: %w", err)
 	}
+	defer resp.Body.Close()
 
-	result.APIVersion = "authentication.k8s.io/v1"
-	result.Kind = "TokenReview"
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return nil, fmt.Errorf("token review returned status %d", resp.StatusCode)
+	}
 
-	return result, nil
+	var result TokenReviewResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decoding token review response: %w", err)
+	}
+
+	return &result, nil
 }

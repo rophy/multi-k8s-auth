@@ -6,31 +6,26 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	authv1 "k8s.io/api/authentication/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // mockReviewer implements TokenReviewer for testing.
 type mockReviewer struct {
-	result *authv1.TokenReview
+	result *TokenReviewResponse
 	err    error
 }
 
-func (m *mockReviewer) Review(ctx context.Context, token string) (*authv1.TokenReview, error) {
+func (m *mockReviewer) Review(ctx context.Context, token string) (*TokenReviewResponse, error) {
 	return m.result, m.err
 }
 
-func authenticatedReviewer(username string, groups []string, extra map[string]authv1.ExtraValue) *mockReviewer {
+func authenticatedReviewer(username string, groups []string, extra map[string][]string) *mockReviewer {
 	return &mockReviewer{
-		result: &authv1.TokenReview{
-			TypeMeta: metav1.TypeMeta{
-				APIVersion: "authentication.k8s.io/v1",
-				Kind:       "TokenReview",
-			},
-			Status: authv1.TokenReviewStatus{
+		result: &TokenReviewResponse{
+			APIVersion: "authentication.k8s.io/v1",
+			Kind:       "TokenReview",
+			Status: TokenReviewStatus{
 				Authenticated: true,
-				User: authv1.UserInfo{
+				User: UserInfo{
 					Username: username,
 					Groups:   groups,
 					Extra:    extra,
@@ -42,8 +37,8 @@ func authenticatedReviewer(username string, groups []string, extra map[string]au
 
 func unauthenticatedReviewer() *mockReviewer {
 	return &mockReviewer{
-		result: &authv1.TokenReview{
-			Status: authv1.TokenReviewStatus{
+		result: &TokenReviewResponse{
+			Status: TokenReviewStatus{
 				Authenticated: false,
 				Error:         "token not valid",
 			},
@@ -81,7 +76,7 @@ func TestAuthHandler_InvalidBearerPrefix(t *testing.T) {
 }
 
 func TestAuthHandler_Authenticated(t *testing.T) {
-	extra := map[string]authv1.ExtraValue{
+	extra := map[string][]string{
 		ExtraKeyClusterName: {"cluster-b"},
 	}
 	handler := NewAuthHandler(authenticatedReviewer("system:serviceaccount:default:test", []string{"system:serviceaccounts", "system:serviceaccounts:default"}, extra))

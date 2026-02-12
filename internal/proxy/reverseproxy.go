@@ -50,7 +50,7 @@ func (h *ReverseProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		r.Header.Set(HeaderForwardedGroups, strings.Join(result.Status.User.Groups, ","))
 	}
 	if clusterNames, ok := result.Status.User.Extra[ExtraKeyClusterName]; ok && len(clusterNames) > 0 {
-		r.Header.Set(HeaderForwardedExtraCluster, string(clusterNames[0]))
+		r.Header.Set(HeaderForwardedExtraCluster, clusterNames[0])
 	}
 
 	r.Header.Del("Authorization")

@@ -2,34 +2,50 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
-
-	authv1 "k8s.io/api/authentication/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/kubernetes/fake"
-	k8stesting "k8s.io/client-go/testing"
 )
 
-func TestKubeTokenReviewer_Authenticated(t *testing.T) {
-	client := fake.NewSimpleClientset()
-	client.PrependReactor("create", "tokenreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		return true, &authv1.TokenReview{
-			TypeMeta: metav1.TypeMeta{
-				APIVersion: "authentication.k8s.io/v1",
-				Kind:       "TokenReview",
-			},
-			Status: authv1.TokenReviewStatus{
+func TestHTTPTokenReviewer_Authenticated(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("method = %s, want POST", r.Method)
+		}
+		if ct := r.Header.Get("Content-Type"); ct != "application/json" {
+			t.Errorf("content-type = %q, want %q", ct, "application/json")
+		}
+
+		var req TokenReviewRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
+		}
+		if req.Spec.Token != "test-token" {
+			t.Errorf("token = %q, want %q", req.Spec.Token, "test-token")
+		}
+
+		resp := TokenReviewResponse{
+			APIVersion: "authentication.k8s.io/v1",
+			Kind:       "TokenReview",
+			Status: TokenReviewStatus{
 				Authenticated: true,
-				User: authv1.UserInfo{
+				User: UserInfo{
 					Username: "system:serviceaccount:default:test",
 					Groups:   []string{"system:serviceaccounts", "system:serviceaccounts:default"},
 				},
 			},
-		}, nil
-	})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
 
-	reviewer := &KubeTokenReviewer{client: client}
+	reviewer := &HTTPTokenReviewer{
+		url:    server.URL,
+		client: server.Client(),
+	}
+
 	result, err := reviewer.Review(context.Background(), "test-token")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -43,18 +59,26 @@ func TestKubeTokenReviewer_Authenticated(t *testing.T) {
 	}
 }
 
-func TestKubeTokenReviewer_Unauthenticated(t *testing.T) {
-	client := fake.NewSimpleClientset()
-	client.PrependReactor("create", "tokenreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		return true, &authv1.TokenReview{
-			Status: authv1.TokenReviewStatus{
+func TestHTTPTokenReviewer_Unauthenticated(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := TokenReviewResponse{
+			APIVersion: "authentication.k8s.io/v1",
+			Kind:       "TokenReview",
+			Status: TokenReviewStatus{
 				Authenticated: false,
 				Error:         "token not valid",
 			},
-		}, nil
-	})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
 
-	reviewer := &KubeTokenReviewer{client: client}
+	reviewer := &HTTPTokenReviewer{
+		url:    server.URL,
+		client: server.Client(),
+	}
+
 	result, err := reviewer.Review(context.Background(), "bad-token")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -65,5 +89,49 @@ func TestKubeTokenReviewer_Unauthenticated(t *testing.T) {
 	}
 	if result.Status.Error != "token not valid" {
 		t.Errorf("error = %q, want %q", result.Status.Error, "token not valid")
+	}
+}
+
+func TestHTTPTokenReviewer_BearerToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		if auth != "Bearer my-sa-token" {
+			t.Errorf("Authorization = %q, want %q", auth, "Bearer my-sa-token")
+		}
+
+		resp := TokenReviewResponse{
+			Status: TokenReviewStatus{Authenticated: true, User: UserInfo{Username: "test"}},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	reviewer := &HTTPTokenReviewer{
+		url:         server.URL,
+		client:      server.Client(),
+		bearerToken: "my-sa-token",
+	}
+
+	_, err := reviewer.Review(context.Background(), "some-token")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestHTTPTokenReviewer_ServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	reviewer := &HTTPTokenReviewer{
+		url:    server.URL,
+		client: server.Client(),
+	}
+
+	_, err := reviewer.Review(context.Background(), "some-token")
+	if err == nil {
+		t.Fatal("expected error for server error response")
 	}
 }

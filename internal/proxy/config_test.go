@@ -22,18 +22,19 @@ func TestConfig_Validate_WithTokenReviewURL(t *testing.T) {
 	}
 }
 
-func TestConfig_RESTConfig_WithURL(t *testing.T) {
+func TestConfig_NewTokenReviewer_WithURL(t *testing.T) {
 	cfg := &Config{
 		TokenReviewURL: "http://kube-federated-auth:8080",
 	}
-	restConfig, err := cfg.RESTConfig()
+	reviewer, err := cfg.NewTokenReviewer()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if restConfig.Host != "http://kube-federated-auth:8080" {
-		t.Errorf("host = %q, want %q", restConfig.Host, "http://kube-federated-auth:8080")
+	want := "http://kube-federated-auth:8080/apis/authentication.k8s.io/v1/tokenreviews"
+	if reviewer.url != want {
+		t.Errorf("url = %q, want %q", reviewer.url, want)
 	}
-	if restConfig.ContentConfig.ContentType != "application/json" {
-		t.Errorf("content type = %q, want %q", restConfig.ContentConfig.ContentType, "application/json")
+	if reviewer.bearerToken != "" {
+		t.Errorf("bearerToken should be empty for custom URL, got %q", reviewer.bearerToken)
 	}
 }
