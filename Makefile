@@ -1,4 +1,4 @@
-.PHONY: build build-proxy image kind deploy deploy-proxy test-unit test-e2e test-e2e-proxy test destroy clean help
+.PHONY: build build-proxy image kind deploy deploy-proxy deploy-proxy-incluster test-unit test-e2e test-e2e-proxy test-e2e-proxy-incluster test destroy clean help
 
 .DEFAULT_GOAL := help
 
@@ -30,6 +30,9 @@ deploy: ## Setup clusters and deploy everything
 deploy-proxy: ## Deploy kube-auth-proxy to cluster-a
 	skaffold run -p proxy
 
+deploy-proxy-incluster: ## Deploy kube-auth-proxy in-cluster mode to cluster-a
+	skaffold run -p proxy-incluster
+
 destroy: ## Destroy Kind clusters and all deployments
 	@echo "Removing deployments from cluster-a..."
 	@kubectl config use-context kind-cluster-a 2>/dev/null && skaffold delete || echo "Cluster-a not found or already cleaned"
@@ -51,6 +54,9 @@ test-e2e: ## Run e2e tests in cluster-a
 
 test-e2e-proxy: ## Run proxy e2e tests in cluster-a
 	kubectl --context kind-cluster-a exec -n kube-federated-auth deployment/test-client -- bats /app/test/e2e/proxy.bats
+
+test-e2e-proxy-incluster: ## Run in-cluster proxy e2e tests
+	kubectl --context kind-cluster-a exec -n kube-federated-auth deployment/test-client -- bats /app/test/e2e/proxy_incluster.bats
 
 ## Help
 

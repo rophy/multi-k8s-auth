@@ -1,19 +1,19 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: kube-auth-proxy
+  name: {{ .Release.Name }}
   namespace: {{ .Release.Namespace }}
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: kube-auth-proxy
+      app: {{ .Release.Name }}
   template:
     metadata:
       labels:
-        app: kube-auth-proxy
+        app: {{ .Release.Name }}
     spec:
-      serviceAccountName: kube-auth-proxy
+      serviceAccountName: {{ .Release.Name }}
       containers:
       - name: kube-auth-proxy
         image: kube-auth-proxy
