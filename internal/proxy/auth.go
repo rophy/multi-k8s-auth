@@ -6,10 +6,18 @@ import (
 	"strings"
 )
 
+// Response headers for auth_request mode (nginx auth_request / traefik ForwardAuth / istio ext_authz)
 const (
 	HeaderAuthRequestUser         = "X-Auth-Request-User"
 	HeaderAuthRequestGroups       = "X-Auth-Request-Groups"
 	HeaderAuthRequestExtraCluster = "X-Auth-Request-Extra-Cluster-Name"
+)
+
+// Request headers for reverse proxy mode (forwarded to upstream)
+const (
+	HeaderForwardedUser         = "X-Forwarded-User"
+	HeaderForwardedGroups       = "X-Forwarded-Groups"
+	HeaderForwardedExtraCluster = "X-Forwarded-Extra-Cluster-Name"
 )
 
 const ExtraKeyClusterName = "authentication.kubernetes.io/cluster-name"

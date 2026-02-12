@@ -52,7 +52,8 @@ setup() {
     echo "# Response body: $body"
 
     # mendhak/http-https-echo returns request headers in JSON
-    echo "$body" | jq -e '.headers["x-auth-request-user"]' > /dev/null
+    # Reverse proxy mode uses X-Forwarded-* headers (like oauth2-proxy)
+    echo "$body" | jq -e '.headers["x-forwarded-user"]' > /dev/null
 }
 
 @test "sidecar proxy strips Authorization header before forwarding" {
@@ -82,5 +83,5 @@ setup() {
 
     echo "# Response body: $body"
 
-    echo "$body" | jq -e '.headers["x-auth-request-extra-cluster-name"]' > /dev/null
+    echo "$body" | jq -e '.headers["x-forwarded-extra-cluster-name"]' > /dev/null
 }

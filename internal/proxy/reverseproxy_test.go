@@ -11,9 +11,9 @@ import (
 
 func TestReverseProxy_Authenticated(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user := r.Header.Get(HeaderAuthRequestUser)
+		user := r.Header.Get(HeaderForwardedUser)
 		if user != "system:serviceaccount:default:test" {
-			t.Errorf("upstream got X-Auth-Request-User = %q, want %q", user, "system:serviceaccount:default:test")
+			t.Errorf("upstream got X-Forwarded-User = %q, want %q", user, "system:serviceaccount:default:test")
 		}
 		if auth := r.Header.Get("Authorization"); auth != "" {
 			t.Error("upstream should not receive Authorization header")
