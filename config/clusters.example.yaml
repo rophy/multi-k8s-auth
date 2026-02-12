@@ -3,7 +3,6 @@
 # Supports "*" wildcard in any segment
 # If set, callers must send their own SA token as Bearer in Authorization header
 authorized_clients:
-  - "cluster-a/kube-federated-auth/kube-auth-proxy"
   - "cluster-a/kube-federated-auth/test-client"
 
 # Global renewal settings (optional, uses defaults if not specified)

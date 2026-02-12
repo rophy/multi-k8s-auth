@@ -149,10 +149,6 @@ List configured clusters and their credential status.
 {"status":"ok"}
 ```
 
-## kube-auth-proxy
-
-See [kube-auth-proxy](https://github.com/rophy/kube-auth-proxy) — a standalone auth proxy for Kubernetes ServiceAccount tokens that works with kube-federated-auth or directly against the Kubernetes API.
-
 ## Environment Variables
 
 ### kube-federated-auth server
