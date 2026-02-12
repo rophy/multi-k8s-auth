@@ -20,13 +20,14 @@ flowchart LR
     end
 
     client -->|2. send SA token| svc
-    kfa -->|3. fetch JWKS| oidc
+    kfa -->|3. detect via JWKS| oidc
+    kfa -->|4. forward TokenReview| cluster-b
 ```
 
 1. Client workload sends its ServiceAccount token to your service
 2. Your service calls kube-federated-auth using standard Kubernetes TokenReview API
-3. kube-federated-auth validates the JWT against the cluster's OIDC/JWKS
-4. Your service authorizes based on returned user info
+3. kube-federated-auth detects the source cluster by verifying the JWT signature against cached JWKS (local, no token leakage)
+4. kube-federated-auth forwards the TokenReview to the detected cluster for authoritative validation (revocation checks, bound object validation)
 
 ## Quick Start
 
@@ -48,11 +49,7 @@ renewal:
   renew_before: "48h"     # Renew when <48h remaining
 
 clusters:
-  # Local cluster (uses in-cluster OIDC)
-  local:
-    issuer: "https://kubernetes.default.svc.cluster.local"
-
-  # EKS cluster (public OIDC endpoint)
+  # EKS cluster (public OIDC endpoint, no credentials needed)
   eks-prod:
     issuer: "https://oidc.eks.us-west-2.amazonaws.com/id/EXAMPLE"
 
@@ -68,19 +65,10 @@ clusters:
 
 ### POST /apis/authentication.k8s.io/v1/tokenreviews
 
-Standard Kubernetes TokenReview API. The target cluster is determined by the hostname.
-
-**Hostname-based routing:**
-
-| Hostname | Cluster |
-|----------|---------|
-| `api.kube-fed.svc.cluster.local` | `local` |
-| `api.{cluster}.kube-fed.svc.cluster.local` | `{cluster}` |
-
-**Request:**
+Standard Kubernetes TokenReview API. The source cluster is automatically detected via JWKS signature verification — no cluster-specific routing needed.
 
 ```bash
-curl -X POST http://api.cluster-b.kube-fed.svc.cluster.local:8080/apis/authentication.k8s.io/v1/tokenreviews \
+curl -X POST http://kube-federated-auth:8080/apis/authentication.k8s.io/v1/tokenreviews \
   -H "Content-Type: application/json" \
   -d '{
     "apiVersion": "authentication.k8s.io/v1",
@@ -104,13 +92,18 @@ curl -X POST http://api.cluster-b.kube-fed.svc.cluster.local:8080/apis/authentic
       "uid": "abc-123",
       "groups": [
         "system:serviceaccounts",
-        "system:serviceaccounts:default"
-      ]
-    },
-    "audiences": ["api"]
+        "system:serviceaccounts:default",
+        "system:authenticated"
+      ],
+      "extra": {
+        "authentication.kubernetes.io/cluster-name": ["cluster-b"]
+      }
+    }
   }
 }
 ```
+
+The `extra["authentication.kubernetes.io/cluster-name"]` field indicates which cluster the token was validated against.
 
 **Error response:**
 
@@ -120,29 +113,26 @@ curl -X POST http://api.cluster-b.kube-fed.svc.cluster.local:8080/apis/authentic
   "kind": "TokenReview",
   "status": {
     "authenticated": false,
-    "error": "token has expired"
+    "error": "token not valid for any configured cluster"
   }
 }
 ```
 
 ### GET /clusters
 
-List configured clusters and their status.
+List configured clusters and their credential status.
 
 ```json
 {
   "clusters": [
     {
-      "name": "local",
-      "issuer": "https://kubernetes.default.svc.cluster.local",
-      "token_status": {
-        "status": "valid"
-      }
+      "name": "eks-prod",
+      "issuer": "https://oidc.eks.us-west-2.amazonaws.com/id/EXAMPLE"
     },
     {
       "name": "cluster-b",
       "issuer": "https://kubernetes.default.svc.cluster.local",
-      "api_server": "https://192.168.128.3:6443",
+      "api_server": "https://192.168.1.100:6443",
       "token_status": {
         "expires_at": "2025-12-21T13:26:40Z",
         "expires_in": "167h50m4s",
@@ -159,39 +149,53 @@ List configured clusters and their status.
 {"status":"ok"}
 ```
 
-## Kubernetes Services
+## kube-auth-proxy
 
-Create a service per cluster to enable hostname-based routing:
+Auth proxy for Kubernetes ServiceAccount tokens, similar to [oauth2-proxy](https://github.com/oauth2-proxy/oauth2-proxy). Validates Bearer tokens via the TokenReview API and sets identity headers.
 
-```yaml
-# Service for local cluster
-apiVersion: v1
-kind: Service
-metadata:
-  name: api.kube-fed
-  namespace: kube-federated-auth
-spec:
-  selector:
-    app: kube-federated-auth
-  ports:
-    - port: 443
-      targetPort: 8080
----
-# Service for remote cluster
-apiVersion: v1
-kind: Service
-metadata:
-  name: api.cluster-b.kube-fed
-  namespace: kube-federated-auth
-spec:
-  selector:
-    app: kube-federated-auth
-  ports:
-    - port: 443
-      targetPort: 8080
+### Modes
+
+**Auth subrequest mode** (`GET /auth`) — for Nginx `auth_request`, Traefik ForwardAuth, or Istio ext_authz:
+
+```
+Request → Nginx → auth_request to kube-auth-proxy /auth
+                   ↓
+              200 + X-Auth-Request-User header  OR  401
 ```
 
+**Reverse proxy mode** (`--upstream`) — sits in front of your service as a sidecar:
+
+```
+Request → kube-auth-proxy → upstream service
+           ↓
+      validates token, strips Authorization,
+      adds X-Forwarded-User/Groups/Extra headers
+```
+
+### Configuration
+
+| Flag | Env | Default | Description |
+|------|-----|---------|-------------|
+| `--token-review-url` | `TOKEN_REVIEW_URL` | (in-cluster API) | TokenReview endpoint URL |
+| `--upstream` | `UPSTREAM` | | Upstream URL (enables reverse proxy mode) |
+| `--port` | `PORT` | `4180` | Listen port |
+| `--auth-prefix` | `AUTH_PREFIX` | `/auth` | Auth subrequest endpoint path |
+
+### Headers
+
+**Auth subrequest mode** (response headers):
+- `X-Auth-Request-User` — authenticated username
+- `X-Auth-Request-Groups` — comma-separated groups
+- `X-Auth-Request-Extra-Cluster-Name` — source cluster name
+
+**Reverse proxy mode** (forwarded to upstream):
+- `X-Forwarded-User` — authenticated username
+- `X-Forwarded-Groups` — comma-separated groups
+- `X-Forwarded-Extra-Cluster-Name` — source cluster name
+
 ## Environment Variables
+
+### kube-federated-auth server
 
 | Variable | Default | Description |
 |----------|---------|-------------|
