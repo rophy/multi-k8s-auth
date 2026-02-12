@@ -1,0 +1,69 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: echo-server
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: echo-server
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: echo-server
+  template:
+    metadata:
+      labels:
+        app: echo-server
+    spec:
+      serviceAccountName: echo-server
+      containers:
+      - name: echo
+        image: mendhak/http-https-echo:latest
+        env:
+        - name: HTTP_PORT
+          value: "8080"
+        - name: HTTPS_PORT
+          value: "8443"
+        ports:
+        - containerPort: 8080
+          name: echo
+      - name: kube-auth-proxy
+        image: kube-auth-proxy
+        imagePullPolicy: IfNotPresent
+        args:
+        - kube-auth-proxy
+        - --token-review-url=http://kube-federated-auth
+        - --upstream=http://localhost:8080
+        - --port=4180
+        ports:
+        - containerPort: 4180
+          name: proxy
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 4180
+          initialDelaySeconds: 3
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 4180
+          initialDelaySeconds: 3
+          periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo-server
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    app: echo-server
+  ports:
+  - name: proxy
+    port: 80
+    targetPort: 4180

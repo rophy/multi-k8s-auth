@@ -1,4 +1,4 @@
-.PHONY: build build-proxy image kind deploy deploy-proxy deploy-proxy-incluster test-unit test-e2e test-e2e-proxy test-e2e-proxy-incluster test destroy clean help
+.PHONY: build build-proxy image kind deploy deploy-proxy deploy-proxy-incluster test-unit test-e2e test destroy clean help
 
 .DEFAULT_GOAL := help
 
@@ -49,14 +49,8 @@ test: test-unit test-e2e ## Run all tests (unit + e2e)
 test-unit: ## Run unit tests
 	go test -v ./internal/...
 
-test-e2e: ## Run e2e tests in cluster-a
-	kubectl --context kind-cluster-a exec -n kube-federated-auth deployment/test-client -- bats /app/test/e2e/
-
-test-e2e-proxy: ## Run proxy e2e tests in cluster-a
-	kubectl --context kind-cluster-a exec -n kube-federated-auth deployment/test-client -- bats /app/test/e2e/proxy.bats
-
-test-e2e-proxy-incluster: ## Run in-cluster proxy e2e tests
-	kubectl --context kind-cluster-a exec -n kube-federated-auth deployment/test-client -- bats /app/test/e2e/proxy_incluster.bats
+test-e2e: ## Run e2e tests
+	bats test/e2e/
 
 ## Help
 

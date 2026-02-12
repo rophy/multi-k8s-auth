@@ -21,6 +21,11 @@ profiles:
     - image: kube-federated-auth-test
       docker:
         dockerfile: Dockerfile.test
+    - image: kube-auth-proxy
+      docker:
+        dockerfile: Dockerfile.proxy
+        buildArgs:
+          VERSION: "{{.IMAGE_TAG}}"
   deploy:
     kubeContext: kind-cluster-a
     helm:

@@ -11,7 +11,7 @@ setup() {
 
 @test "health endpoint returns ok" {
     local result
-    result=$(curl -s "${SERVICE_URL}/health")
+    result=$(kexec curl -s "${SERVICE_URL}/health")
 
     echo "# Response: $result"
 
@@ -22,7 +22,7 @@ setup() {
 
 @test "clusters endpoint lists configured clusters" {
     local result
-    result=$(curl -s "${SERVICE_URL}/clusters")
+    result=$(kexec curl -s "${SERVICE_URL}/clusters")
 
     echo "# Response: $result"
 
@@ -64,20 +64,36 @@ setup() {
 }
 
 @test "kubectl can call TokenReview via kubeconfig" {
-    local kubeconfig
-    kubeconfig=$(mktemp)
-    generate_kubeconfig > "$kubeconfig"
-
     local token
     token=$(get_token)
 
-    # Use kubectl --raw to POST a TokenReview
+    # Generate kubeconfig and run kubectl inside the pod
     local result
-    result=$(kubectl --kubeconfig "$kubeconfig" create --raw /apis/authentication.k8s.io/v1/tokenreviews -f - <<EOF
-{"apiVersion":"authentication.k8s.io/v1","kind":"TokenReview","spec":{"token":"${token}"}}
-EOF
-    )
-    rm -f "$kubeconfig"
+    result=$(kexec sh -c "
+        KUBECONFIG=\$(mktemp)
+        cat > \$KUBECONFIG <<KUBEEOF
+apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: ${SERVICE_URL}
+  name: federated-auth
+contexts:
+- context:
+    cluster: federated-auth
+    user: test
+  name: test
+current-context: test
+users:
+- name: test
+  user:
+    token: ${token}
+KUBEEOF
+        kubectl --kubeconfig \$KUBECONFIG create --raw /apis/authentication.k8s.io/v1/tokenreviews -f - <<JSONEOF
+{\"apiVersion\":\"authentication.k8s.io/v1\",\"kind\":\"TokenReview\",\"spec\":{\"token\":\"${token}\"}}
+JSONEOF
+        rm -f \$KUBECONFIG
+    ")
 
     echo "# Response: $result"
 
