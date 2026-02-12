@@ -10,8 +10,9 @@ build: ## Build Docker images (local dev)
 build-proxy: ## Build kube-auth-proxy Docker image (local dev)
 	skaffold build -p proxy
 
-image: ## Build release image
+image: ## Build all release images
 	./scripts/build-image.sh
+	./scripts/build-proxy-image.sh
 
 clean: ## Clean local build artifacts
 	rm -rf bin/
