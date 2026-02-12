@@ -18,10 +18,17 @@ cluster_exists() {
 # Function to create cluster if it doesn't exist
 create_cluster_if_needed() {
     local cluster_name=$1
+    local context_name="kind-${cluster_name}"
 
     if cluster_exists "$cluster_name"; then
         echo "✅ Cluster '$cluster_name' already exists"
     else
+        # Clean up stale kubectl context if it exists
+        if kubectl config get-contexts "$context_name" &>/dev/null; then
+            echo "Removing stale kubectl context '$context_name'..."
+            kubectl config delete-context "$context_name" &>/dev/null || true
+            kubectl config delete-cluster "$context_name" &>/dev/null || true
+        fi
         echo "Creating cluster '$cluster_name'..."
         kind create cluster --name "$cluster_name" --wait 5m
         echo "✅ Cluster '$cluster_name' created"
