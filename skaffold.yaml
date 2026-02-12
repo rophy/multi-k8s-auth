@@ -21,11 +21,6 @@ profiles:
     - image: kube-federated-auth-test
       docker:
         dockerfile: Dockerfile.test
-    - image: kube-auth-proxy
-      docker:
-        dockerfile: Dockerfile.proxy
-        buildArgs:
-          VERSION: "{{.IMAGE_TAG}}"
   deploy:
     kubeContext: kind-cluster-a
     helm:
@@ -46,50 +41,4 @@ profiles:
         createNamespace: true
         namespace: kube-federated-auth
         chartPath: k8s/cluster-b
-- name: proxy
-  build:
-    tagPolicy:
-      gitCommit:
-        variant: Tags
-    local:
-      push: false
-      useBuildkit: true
-    artifacts:
-    - image: kube-auth-proxy
-      docker:
-        dockerfile: Dockerfile.proxy
-        buildArgs:
-          VERSION: "{{.IMAGE_TAG}}"
-  deploy:
-    kubeContext: kind-cluster-a
-    helm:
-      releases:
-      - name: kube-auth-proxy
-        createNamespace: true
-        namespace: kube-federated-auth
-        chartPath: k8s/kube-auth-proxy
-- name: proxy-incluster
-  build:
-    tagPolicy:
-      gitCommit:
-        variant: Tags
-    local:
-      push: false
-      useBuildkit: true
-    artifacts:
-    - image: kube-auth-proxy
-      docker:
-        dockerfile: Dockerfile.proxy
-        buildArgs:
-          VERSION: "{{.IMAGE_TAG}}"
-  deploy:
-    kubeContext: kind-cluster-a
-    helm:
-      releases:
-      - name: kube-auth-proxy-incluster
-        createNamespace: true
-        namespace: kube-federated-auth
-        chartPath: k8s/kube-auth-proxy
-        setValues:
-          tokenReviewURL: ""
 

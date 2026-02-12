@@ -1,4 +1,0 @@
-tokenReviewURL: "http://kube-federated-auth"
-upstream: ""
-port: 4180
-authPrefix: "/auth"

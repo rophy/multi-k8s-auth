@@ -56,7 +56,6 @@ kubectl exec -n kube-federated-auth deploy/test-client --context kind-cluster-a 
 ```
 cmd/
   server/main.go            # Entry point for kube-federated-auth server
-  proxy/main.go             # Entry point for kube-auth-proxy
 internal/
   config/config.go          # Configuration parsing and defaults
   credentials/
@@ -66,36 +65,13 @@ internal/
     tokenreview.go          # POST /apis/authentication.k8s.io/v1/tokenreviews endpoint
     clusters.go             # GET /clusters endpoint
   oidc/verifier.go          # OIDC/JWKS token verification
-  proxy/
-    auth.go                 # GET /auth subrequest handler (Nginx/Traefik/Istio)
-    reverseproxy.go         # Reverse proxy with auth validation
-    tokenreview.go          # TokenReview HTTP client
-    config.go               # Proxy configuration and flags
-    health.go               # GET /healthz handler
-    server.go               # Proxy HTTP server setup
   server/server.go          # Main server HTTP setup
 k8s/
   cluster-a/                # Helm chart for main cluster (runs server)
   cluster-b/                # Helm chart for remote cluster (ServiceAccount only)
-  kube-auth-proxy/          # Helm chart for auth proxy
 config/clusters.example.yaml # Example configuration
 docs/
-  DESIGN_V2.md              # V2 architecture design document
-```
-
-## kube-auth-proxy
-
-Auth proxy for Kubernetes ServiceAccount tokens (similar to oauth2-proxy).
-
-```bash
-# Build and deploy proxy
-make deploy-proxy
-
-# Check proxy logs
-kubectl logs -n kube-federated-auth deploy/kube-auth-proxy --context kind-cluster-a
-
-# Run proxy e2e tests
-make test-e2e-proxy
+  DESIGN_V2.MD              # V2 architecture design document
 ```
 
 ## Git Commit Convention

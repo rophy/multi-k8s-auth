@@ -1,4 +1,4 @@
-.PHONY: build build-proxy image kind deploy deploy-proxy deploy-proxy-incluster test-unit test-e2e test destroy clean help
+.PHONY: build image kind deploy test-unit test-e2e test destroy clean help
 
 .DEFAULT_GOAL := help
 
@@ -7,12 +7,8 @@
 build: ## Build Docker images (local dev)
 	skaffold build -p cluster-a
 
-build-proxy: ## Build kube-auth-proxy Docker image (local dev)
-	skaffold build -p proxy
-
-image: ## Build all release images
+image: ## Build release image
 	./scripts/build-image.sh
-	./scripts/build-proxy-image.sh
 
 clean: ## Clean local build artifacts
 	rm -rf bin/
@@ -27,12 +23,6 @@ deploy: ## Setup clusters and deploy everything
 	skaffold run -p cluster-b
 	scripts/setup-multicluster.sh
 	skaffold run -p cluster-a
-
-deploy-proxy: ## Deploy kube-auth-proxy to cluster-a
-	skaffold run -p proxy
-
-deploy-proxy-incluster: ## Deploy kube-auth-proxy in-cluster mode to cluster-a
-	skaffold run -p proxy-incluster
 
 destroy: ## Destroy Kind clusters and all deployments
 	@echo "Removing deployments from cluster-a..."

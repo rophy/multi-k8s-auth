@@ -1,4 +1,0 @@
-apiVersion: v2
-name: kube-auth-proxy
-description: Authentication proxy for Kubernetes ServiceAccount tokens
-version: 1.0.0
