@@ -11,7 +11,7 @@ flowchart LR
     subgraph cluster-a["cluster-a (service)"]
         svc[my-svc]
         kfa[kube-federated-auth]
-        svc -->|1. TokenReview| kfa
+        svc -->|2. TokenReview| kfa
     end
 
     subgraph cluster-b["cluster-b (client)"]
@@ -19,13 +19,13 @@ flowchart LR
         oidc[OIDC endpoint]
     end
 
-    client -->|2. send SA token| svc
+    client -->|1. send SA token| svc
     kfa -->|3. detect via JWKS| oidc
     kfa -->|4. forward TokenReview| cluster-b
 ```
 
 1. Client workload sends its ServiceAccount token to your service
-2. Your service calls kube-federated-auth using standard Kubernetes TokenReview API
+2. Your service calls kube-federated-auth using standard Kubernetes [TokenReview API](https://kubernetes.io/docs/reference/kubernetes-api/authentication-resources/token-review-v1/)
 3. kube-federated-auth detects the source cluster by verifying the JWT signature against cached JWKS (local, no token leakage)
 4. kube-federated-auth forwards the TokenReview to the detected cluster for authoritative validation (revocation checks, bound object validation)
 
@@ -60,6 +60,28 @@ clusters:
     ca_cert: "/etc/kube-federated-auth/certs/cluster-b-ca.crt"
     token_path: "/etc/kube-federated-auth/certs/cluster-b-token"
 ```
+
+## RBAC Requirements
+
+### Server cluster (where kube-federated-auth runs)
+
+The server's ServiceAccount needs:
+
+| Resource | Verbs | Scope | Reason |
+|----------|-------|-------|--------|
+| `tokenreviews` | `create` | ClusterRole | Forward TokenReview requests to the local API server |
+| `secrets` | `get`, `create`, `update` | Role (namespaced) | Persist renewed credentials for remote clusters |
+
+### Remote clusters (whose tokens are validated)
+
+A ServiceAccount on each remote cluster needs:
+
+| Resource | Verbs | Scope | Reason |
+|----------|-------|-------|--------|
+| `tokenreviews` | `create` | ClusterRole | Allow the server to forward TokenReview requests |
+| `serviceaccounts/token` | `create` | Role (namespaced) | Allow the server to request tokens for credential renewal |
+
+The server authenticates to remote clusters using a bootstrap token (provided via `token_path` in config). On first startup, it reads this bootstrap token and uses it to request a new token via the remote cluster's TokenRequest API. The renewed token is persisted to a Kubernetes Secret, and subsequent renewals use the stored token — the bootstrap token file is only read again if the Secret is missing or empty for that cluster. CA certificates are not renewed — they are read once from `ca_cert` at startup.
 
 ## API
 
