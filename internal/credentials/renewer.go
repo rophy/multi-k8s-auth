@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"log"
 	"os"
@@ -89,6 +90,9 @@ func (r *Renewer) renew(ctx context.Context, cluster string, cfg config.ClusterC
 			return fmt.Errorf("no credentials available for cluster %s", cluster)
 		}
 	}
+
+	// Check CA certificate expiration
+	checkCACertExpiration(cluster, creds.CACert)
 
 	// Check if token needs renewal based on expiration
 	renewBefore := r.config.GetRenewalRenewBefore()
@@ -210,6 +214,33 @@ func getTokenExpiration(token string) (time.Time, error) {
 	}
 
 	return time.Unix(claims.Exp, 0), nil
+}
+
+// checkCACertExpiration logs a warning if the CA certificate is within the last 20% of its lifetime.
+func checkCACertExpiration(cluster string, caCertPEM []byte) {
+	if len(caCertPEM) == 0 {
+		return
+	}
+
+	block, _ := pem.Decode(caCertPEM)
+	if block == nil {
+		log.Printf("WARNING: cluster %s: failed to decode CA certificate PEM", cluster)
+		return
+	}
+
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		log.Printf("WARNING: cluster %s: failed to parse CA certificate: %v", cluster, err)
+		return
+	}
+
+	lifetime := cert.NotAfter.Sub(cert.NotBefore)
+	threshold := lifetime / 5 // 20% of lifetime
+	timeUntilExpiry := time.Until(cert.NotAfter)
+	if timeUntilExpiry < threshold {
+		log.Printf("WARNING: cluster %s: CA certificate expires in %d days (%s)",
+			cluster, int(timeUntilExpiry.Hours()/24), cert.NotAfter.Format(time.RFC3339))
+	}
 }
 
 func (r *Renewer) createClient(cfg config.ClusterConfig, creds *Credentials) (*kubernetes.Clientset, error) {
