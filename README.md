@@ -1,5 +1,7 @@
 # kube-federated-auth
 
+[![CI](https://github.com/rophy/kube-federated-auth/actions/workflows/ci.yaml/badge.svg)](https://github.com/rophy/kube-federated-auth/actions/workflows/ci.yaml)
+
 Federated ServiceAccount authentication across Kubernetes clusters.
 
 Validate ServiceAccount tokens from multiple Kubernetes clusters using their OIDC endpoints. Enables cross-cluster workload authentication without service meshes or additional identity infrastructure.
@@ -28,6 +30,12 @@ flowchart LR
 2. Your service calls kube-federated-auth using standard Kubernetes [TokenReview API](https://kubernetes.io/docs/reference/kubernetes-api/authentication-resources/token-review-v1/)
 3. kube-federated-auth detects the source cluster by verifying the JWT signature against cached JWKS (local, no token leakage)
 4. kube-federated-auth forwards the TokenReview to the detected cluster for authoritative validation (revocation checks, bound object validation)
+
+## Installation
+
+```bash
+docker pull ghcr.io/rophy/kube-federated-auth:latest
+```
 
 ## Quick Start
 
