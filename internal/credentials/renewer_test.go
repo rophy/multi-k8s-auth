@@ -10,6 +10,7 @@ import (
 	"encoding/pem"
 	"log"
 	"math/big"
+	"os"
 	"testing"
 	"time"
 )
@@ -34,7 +35,7 @@ func TestCheckCACertExpiration_WarnsWhenExpiringSoon(t *testing.T) {
 
 	var buf bytes.Buffer
 	log.SetOutput(&buf)
-	defer log.SetOutput(nil)
+	defer log.SetOutput(os.Stderr)
 
 	checkCACertExpiration("test-cluster", cert)
 
@@ -53,7 +54,7 @@ func TestCheckCACertExpiration_NoWarningWhenFarFromExpiry(t *testing.T) {
 
 	var buf bytes.Buffer
 	log.SetOutput(&buf)
-	defer log.SetOutput(nil)
+	defer log.SetOutput(os.Stderr)
 
 	checkCACertExpiration("test-cluster", cert)
 
@@ -65,7 +66,7 @@ func TestCheckCACertExpiration_NoWarningWhenFarFromExpiry(t *testing.T) {
 func TestCheckCACertExpiration_InvalidPEM(t *testing.T) {
 	var buf bytes.Buffer
 	log.SetOutput(&buf)
-	defer log.SetOutput(nil)
+	defer log.SetOutput(os.Stderr)
 
 	checkCACertExpiration("test-cluster", []byte("not a pem"))
 
@@ -78,7 +79,7 @@ func TestCheckCACertExpiration_InvalidPEM(t *testing.T) {
 func TestCheckCACertExpiration_EmptyCert(t *testing.T) {
 	var buf bytes.Buffer
 	log.SetOutput(&buf)
-	defer log.SetOutput(nil)
+	defer log.SetOutput(os.Stderr)
 
 	checkCACertExpiration("test-cluster", nil)
 

@@ -109,6 +109,31 @@ func (r *Renewer) renew(ctx context.Context, cluster string, cfg config.ClusterC
 		log.Printf("Renewing credentials for cluster %s: could not determine expiration (%v)", cluster, err)
 	}
 
+	// Try renewal with current credentials
+	if err := r.requestNewToken(ctx, cluster, cfg, creds); err != nil {
+		// If renewal failed and bootstrap credentials are available, retry with bootstrap
+		if cfg.TokenPath != "" && cfg.CACert != "" {
+			log.Printf("Token renewal failed for cluster %s, retrying with bootstrap credentials: %v", cluster, err)
+			if loadErr := r.credStore.LoadFromFiles(cluster, cfg.TokenPath, cfg.CACert); loadErr != nil {
+				log.Printf("ERROR: cluster %s: failed to read bootstrap token from %s: %v", cluster, cfg.TokenPath, loadErr)
+				return fmt.Errorf("requesting token: %w (bootstrap fallback also failed: %v)", err, loadErr)
+			}
+			bootstrapCreds, _ := r.credStore.Get(cluster)
+			if retryErr := r.requestNewToken(ctx, cluster, cfg, bootstrapCreds); retryErr != nil {
+				log.Printf("ERROR: cluster %s: bootstrap token at %s is invalid or expired: %v", cluster, cfg.TokenPath, retryErr)
+				log.Printf("ERROR: cluster %s: token renewal failed. Please mount a new bootstrap token at %s.", cluster, cfg.TokenPath)
+				return fmt.Errorf("requesting token with bootstrap credentials: %w", retryErr)
+			}
+		} else {
+			log.Printf("ERROR: cluster %s: token renewal failed. Please mount a new bootstrap token and set token_path.", cluster)
+			return fmt.Errorf("requesting token: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (r *Renewer) requestNewToken(ctx context.Context, cluster string, cfg config.ClusterConfig, creds *Credentials) error {
 	// Extract namespace and service account from current token
 	namespace, serviceAccount, err := parseServiceAccountFromToken(creds.Token)
 	if err != nil {
@@ -137,7 +162,7 @@ func (r *Renewer) renew(ctx context.Context, cluster string, cfg config.ClusterC
 		metav1.CreateOptions{},
 	)
 	if err != nil {
-		return fmt.Errorf("requesting token: %w", err)
+		return err
 	}
 
 	// Store new credentials (CA cert doesn't change)

@@ -175,6 +175,16 @@ func (s *Store) saveToSecret(ctx context.Context) error {
 	return nil
 }
 
+// LoadBootstrapFromFiles loads bootstrap credentials from files only if the store
+// doesn't already have credentials for the cluster (e.g., from a persisted Secret).
+func (s *Store) LoadBootstrapFromFiles(cluster, tokenPath, caPath string) error {
+	if _, ok := s.Get(cluster); ok {
+		log.Printf("Skipping bootstrap for cluster %s: credentials already loaded from secret", cluster)
+		return nil
+	}
+	return s.LoadFromFiles(cluster, tokenPath, caPath)
+}
+
 // LoadFromFiles loads bootstrap credentials from files (for initial setup)
 func (s *Store) LoadFromFiles(cluster, tokenPath, caPath string) error {
 	token, err := os.ReadFile(tokenPath)

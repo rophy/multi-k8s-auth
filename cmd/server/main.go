@@ -41,10 +41,10 @@ func main() {
 			log.Fatalf("Failed to create credential store: %v", err)
 		}
 
-		// Load bootstrap credentials from files for remote clusters
+		// Load bootstrap credentials from files for clusters not already in the store
 		for clusterName, clusterCfg := range cfg.Clusters {
 			if clusterCfg.TokenPath != "" && clusterCfg.CACert != "" {
-				if err := credStore.LoadFromFiles(clusterName, clusterCfg.TokenPath, clusterCfg.CACert); err != nil {
+				if err := credStore.LoadBootstrapFromFiles(clusterName, clusterCfg.TokenPath, clusterCfg.CACert); err != nil {
 					log.Printf("Warning: could not load bootstrap credentials for %s: %v", clusterName, err)
 				}
 			}
