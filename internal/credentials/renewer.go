@@ -26,20 +26,26 @@ type VerifierInvalidator interface {
 	InvalidateVerifier(clusterName string)
 }
 
+// clientFactory creates a Kubernetes client for a remote cluster.
+type clientFactory func(cfg config.ClusterConfig, creds *Credentials) (kubernetes.Interface, error)
+
 // Renewer handles automatic credential renewal for remote clusters
 type Renewer struct {
-	config    *config.Config
-	credStore *Store
-	verifier  VerifierInvalidator
+	config        *config.Config
+	credStore     *Store
+	verifier      VerifierInvalidator
+	clientFactory clientFactory
 }
 
 // NewRenewer creates a new credential renewer
 func NewRenewer(cfg *config.Config, store *Store, verifier VerifierInvalidator) *Renewer {
-	return &Renewer{
+	r := &Renewer{
 		config:    cfg,
 		credStore: store,
 		verifier:  verifier,
 	}
+	r.clientFactory = r.createClient
+	return r
 }
 
 // Start begins the renewal loops for all remote clusters
@@ -141,7 +147,7 @@ func (r *Renewer) requestNewToken(ctx context.Context, cluster string, cfg confi
 	}
 
 	// Create K8s client for remote cluster
-	client, err := r.createClient(cfg, creds)
+	client, err := r.clientFactory(cfg, creds)
 	if err != nil {
 		return fmt.Errorf("creating k8s client: %w", err)
 	}
@@ -268,7 +274,7 @@ func checkCACertExpiration(cluster string, caCertPEM []byte) {
 	}
 }
 
-func (r *Renewer) createClient(cfg config.ClusterConfig, creds *Credentials) (*kubernetes.Clientset, error) {
+func (r *Renewer) createClient(cfg config.ClusterConfig, creds *Credentials) (kubernetes.Interface, error) {
 	// Load CA cert
 	var caCert []byte
 	if creds != nil && len(creds.CACert) > 0 {
